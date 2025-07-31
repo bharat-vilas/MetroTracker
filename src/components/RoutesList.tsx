@@ -68,19 +68,31 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
   const fetchStops = async (route: ApiRoute) => {
     setSelectedRouteForModal(route);
     setLoadingStops(true);
-    setStopFilter('all');
+    setStopFilter('all'); // Reset filter to 'all' when fetching new stops
     try {
       const stopsData = await apiService.getStopsForRoute(route.name);
       if (stopsData?.stops) {
-        setStops(stopsData.stops);
-        setFilteredStops(stopsData.stops);
+        // Clean and deduplicate stops data
+        const cleanStops = stopsData.stops.map(stop => ({
+          ...stop,
+          name: stop.name?.trim() || 'Unknown Stop' // Clean whitespace and handle undefined names
+        }));
+        
+        console.log('Fetched stops for', route.name, ':', cleanStops);
+        setStops(cleanStops);
+        setFilteredStops(cleanStops);
         toast({
           title: "Stops Loaded",
-          description: `Found ${stopsData.stops.length} stops for ${route.name}`,
+          description: `Found ${cleanStops.length} stops for ${route.name}`,
         });
+      } else {
+        setStops([]);
+        setFilteredStops([]);
       }
     } catch (error) {
       console.error('Failed to fetch stops:', error);
+      setStops([]);
+      setFilteredStops([]);
       toast({
         title: "Error",
         description: "Failed to load stops",
@@ -92,7 +104,8 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
   };
 
   const handleFilterChange = (value: string) => {
-    console.log("selected value of stops",value);
+    console.log("Selected stop filter value:", value);
+    console.log("Available unique stop names:", Array.from(new Set(stops.map(s => s.name))));
     setStopFilter(value);
     
     if (value === 'all') {
@@ -100,6 +113,7 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
     } else {
       // Filter by stop name
       const filtered = stops.filter(stop => stop.name === value);
+      console.log("Filtered stops count:", filtered.length);
       setFilteredStops(filtered);
     }
   };
@@ -229,15 +243,15 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
                               <Filter className="h-4 w-4" />
                               <span className="text-sm font-medium">Filter by Stop:</span>
                             </div>
-                             <Select value={stopFilter} onValueChange={handleFilterChange}>
+                             <Select key={`${selectedRouteForModal?.id}-${stops.length}`} value={stopFilter} onValueChange={handleFilterChange}>
                                <SelectTrigger className="w-full z-[10001]">
                                  <SelectValue placeholder="Select stop to view" />
                                </SelectTrigger>
                                <SelectContent className="z-[10002] bg-popover border shadow-lg max-h-[200px] overflow-auto">
                                 <SelectItem value="all">All Stops</SelectItem>
-                                {stops.map((stop, index) => (
-                                  <SelectItem key={index} value={stop.name}>
-                                    {stop.name}
+                                {Array.from(new Set(stops.map(stop => stop.name))).map((stopName, index) => (
+                                  <SelectItem key={`${stopName}-${index}`} value={stopName}>
+                                    {stopName}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
