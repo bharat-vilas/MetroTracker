@@ -8,6 +8,7 @@ import EmbedTracker from "./pages/EmbedTracker.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import PolylineDemo from "./components/PolylineDemo.tsx";
 import PolylineUsageExample from "./components/PolylineUsageExample.tsx";
+import PolylineAPIDemo from "./components/PolylineAPIDemo.tsx";
 
 const queryClient = new QueryClient();
 
@@ -22,6 +23,7 @@ const App = () => (
           <Route path="/embed" element={<EmbedTracker />} />
           <Route path="/polyline-demo" element={<PolylineDemo />} />
           <Route path="/polyline-usage" element={<PolylineUsageExample />} />
+           <Route path="/polyline-api" element={<PolylineAPIDemo />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

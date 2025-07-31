@@ -280,11 +280,28 @@ const MapComponent: React.FC<MapProps> = ({
     clearMapElements();
 
     try {
-      // Fetch polyline data for all routes
-      const polylineData = await apiService.getRoutePolyline();
+       // Use the new GeoJSON polyline API method
+      const polylineData = await apiService.getGeoJSONPolylines();
       
-      if (!polylineData?.routes) {
-        console.warn('No polyline data available');
+      console.log('Fetched polyline data:', polylineData);
+      
+      if (!polylineData?.result || polylineData.result.length === 0) {
+        console.warn('No polyline data available from API');
+        return;
+      }
+
+      // If we have polyline data, use the GeoJSON method
+      if (polylineData.result.length > 0) {
+        console.log('Using GeoJSON polyline method with API data');
+        drawPolylinesFromGeoJSON(polylineData, routes);
+        return;
+      }
+
+      // Fallback to legacy method if needed
+      const legacyPolylineData = await apiService.getRoutePolyline();
+      
+      if (!legacyPolylineData?.routes) {
+        console.warn('No legacy polyline data available');
         return;
       }
 
@@ -292,7 +309,7 @@ const MapComponent: React.FC<MapProps> = ({
 
       routes.forEach((route, index) => {
         // Find matching polyline data for this route
-        const routePolylineData = polylineData.routes.find(
+        const routePolylineData = legacyPolylineData.routes.find(
           (polyRoute: any) => 
             polyRoute.segment_id === route.id || 
             polyRoute.route_name === route.name ||
@@ -373,7 +390,7 @@ const MapComponent: React.FC<MapProps> = ({
     } catch (error) {
       console.error('Failed to fetch polyline data:', error);
     }
-  }, [clearMapElements, createStopMarker, routeColors]);
+  }, [clearMapElements, createStopMarker, routeColors, drawPolylinesFromGeoJSON]);
 
   // Fetch all vehicles
   const fetchAllVehicles = useCallback(async () => {
