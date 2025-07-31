@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { ApiRoute, VehicleAvlData, RouteStop, apiService } from '@/services/apiService';
+import { processPolylineData } from '@/lib/polylineUtils';
 
 // Fix for default markers in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -208,20 +209,38 @@ const MapComponent: React.FC<MapProps> = ({ selectedRoute, onVehicleSelect, sele
 
         if (routePolylineData) {
           const color = routePolylineData.color || routeColors[index % routeColors.length];
+          let coordinates: [number, number][] = [];
 
-          // Draw polyline if coordinates are available
+          // Process coordinates - handle both encoded polylines and coordinate arrays
           if (routePolylineData.coordinates && routePolylineData.coordinates.length > 0) {
+            coordinates = processPolylineData(routePolylineData.coordinates);
+          } else if (routePolylineData.polyline) {
+            // Try to decode polyline string
+            coordinates = processPolylineData(routePolylineData.polyline);
+          }
+
+          // Draw polyline if we have valid coordinates
+          if (coordinates.length > 0) {
+            console.log(`Drawing polyline for route ${route.name} with ${coordinates.length} points`);
+            
             const routeLine = L.polyline(
-              routePolylineData.coordinates.map((coord: any) => [coord.lat || coord.latitude, coord.lng || coord.longitude]),
+              coordinates,
               {
                 color: color,
                 weight: 4,
                 opacity: 0.8
               }
-            ).addTo(mapRef.current);
+            ).bindPopup(`
+              <div class="p-2">
+                <h3 class="font-bold text-sm">${route.name}</h3>
+                <p class="text-xs text-gray-600">${coordinates.length} points</p>
+              </div>
+            `).addTo(mapRef.current);
 
             routeLinesRef.current.push(routeLine);
             allBounds.push(routeLine.getBounds());
+          } else {
+            console.warn(`No valid coordinates found for route: ${route.name}`, routePolylineData);
           }
 
           // Add stop markers if available

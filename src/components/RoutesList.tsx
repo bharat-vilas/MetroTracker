@@ -172,15 +172,22 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
         </div>
         
         {/* Select All Checkbox */}
-        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
-          <Checkbox
-            id="select-all"
-            checked={selectAll}
-            onCheckedChange={handleSelectAllChange}
-          />
-          <label htmlFor="select-all" className="text-sm text-foreground cursor-pointer">
-            Mark all
-          </label>
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="select-all"
+              checked={selectAll}
+              onCheckedChange={handleSelectAllChange}
+            />
+            <label htmlFor="select-all" className="text-sm text-foreground cursor-pointer">
+              Mark all
+            </label>
+          </div>
+          {selectedRoutesForMap.length > 0 && (
+            <div className="text-xs text-primary font-medium px-2 py-1 bg-primary/10 rounded">
+              {selectedRoutesForMap.length} on map
+            </div>
+          )}
         </div>
       </div>
 
@@ -209,7 +216,12 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
                         onCheckedChange={(checked) => handleRouteCheckboxChange(route.id, checked as boolean)}
                       />
                       <div className="flex flex-col flex-1 min-w-0">
-                        <span className="text-sm font-medium truncate">{route.name}</span>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm font-medium truncate">{route.name}</span>
+                          {selectedRoutesForMap.includes(route.id) && (
+                            <div className="w-2 h-2 bg-primary rounded-full animate-pulse" title="Displayed on map" />
+                          )}
+                        </div>
                         <div className="flex items-center space-x-1 text-xs text-muted-foreground">
                           {getStatusIcon(route.status)}
                           <span>{route.status}</span>
