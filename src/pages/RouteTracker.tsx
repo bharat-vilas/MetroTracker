@@ -3,24 +3,47 @@ import Header from '@/components/Header';
 import Map from '@/components/Map';
 import RoutesList from '@/components/RoutesList';
 import { useToast } from '@/hooks/use-toast.ts';
-import { ApiRoute } from '@/services/apiService.tsx';
+import { ApiRoute, apiService } from '@/services/apiService.tsx';
+import { PolylineResponse } from '@/lib/polylineUtils';
 
 const RouteTracker: React.FC = () => {
   console.log('RouteTracker rendering');
   const [selectedRoute, setSelectedRoute] = useState<ApiRoute | null>(null);
   const [selectedRoutesForMap, setSelectedRoutesForMap] = useState<ApiRoute[]>([]);
+  const [polylineData, setPolylineData] = useState<PolylineResponse | null>(null);
+  const [polylineLoading, setPolylineLoading] = useState<boolean>(false);
   const { toast } = useToast();
-  const [polylineData, setPolylineData] = useState<ApiRoute | null>(null);
-//   useEffect(()=>{
-//     fetchPolylineData();
-//   },[])
 
-//   const fetchPolylineData = async () => {
-//     const data = await getPolylineData();
-//     if (data) {
-//       setPolylineData(data); // Set it into state
-//     }
-//   };
+  // Fetch polyline data once on component mount
+  const fetchPolylineData = async () => {
+    if (polylineLoading || polylineData) return; // Prevent duplicate calls
+    
+    setPolylineLoading(true);
+    console.log('RouteTracker: Fetching polyline data...');
+    
+    try {
+      const data = await apiService.getGeoJSONPolylines();
+      if (data && data.result) {
+        setPolylineData(data);
+        console.log('RouteTracker: Polyline data fetched successfully', data.result.length, 'routes');
+      } else {
+        console.warn('RouteTracker: No polyline data received');
+      }
+    } catch (error) {
+      console.error('RouteTracker: Failed to fetch polyline data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load route paths. Map functionality may be limited.",
+        variant: "destructive"
+      });
+    } finally {
+      setPolylineLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPolylineData();
+  }, []);
 
   const handleRouteSelect = (route: ApiRoute) => {
     setSelectedRoute(route);
@@ -60,6 +83,7 @@ const RouteTracker: React.FC = () => {
           selectedRoute={selectedRoute}
           onVehicleSelect={handleVehicleSelect}
           selectedRoutesForMap={selectedRoutesForMap}
+          polylineData={polylineData}
         />
       </div>
     </div>
