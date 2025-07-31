@@ -153,7 +153,7 @@ const MapComponent: React.FC<MapProps> = ({
       if (existingMarker) {
         // Smooth transition to new position
         const currentLatLng = existingMarker.getLatLng();
-        const newLatLng = L.latLng(vehicle.latitude, vehicle.longitude);
+        const newLatLng = L.latLng(vehicle.lat || vehicle.latitude || 0, vehicle.lng || vehicle.longitude || 0);
         
         // Animate the marker to the new position
         let start = Date.now();
@@ -179,15 +179,18 @@ const MapComponent: React.FC<MapProps> = ({
         animate();
       } else {
         // Create new marker
-        const marker = L.marker([vehicle.latitude, vehicle.longitude], {
+        const marker = L.marker([vehicle.lat || vehicle.latitude || 0, vehicle.lng || vehicle.longitude || 0], {
           icon: createVehicleIcon(vehicle.vehicle_id, vehicle.speed || 0)
         })
         .bindPopup(`
           <div class="p-2">
             <h3 class="font-bold">${vehicle.vehicle_id}</h3>
+            <p class="text-sm">Driver: ${vehicle.driver_id || 'N/A'}</p>
+            <p class="text-sm">Route: ${vehicle.segment_id || 'N/A'}</p>
             <p class="text-sm">Speed: ${vehicle.speed || 'N/A'} km/h</p>
-            <p class="text-sm">Heading: ${vehicle.heading || 'N/A'}°</p>
-            <p class="text-xs text-gray-500">Updated: ${new Date(vehicle.timestamp).toLocaleTimeString()}</p>
+            <p class="text-sm">Direction: ${vehicle.angle || vehicle.direction || vehicle.heading || 'N/A'}°</p>
+            <p class="text-xs text-gray-500">Updated: ${vehicle.record_time || vehicle.device_time || 'N/A'}</p>
+            <p class="text-xs text-gray-500">Date: ${vehicle.record_date || 'N/A'}</p>
           </div>
         `)
         .addTo(mapRef.current);
@@ -527,11 +530,32 @@ const MapComponent: React.FC<MapProps> = ({
         
         avlData.result.forEach((vehicleGroup: any) => {
           if (vehicleGroup.avl_data && Array.isArray(vehicleGroup.avl_data)) {
-            vehicleGroup.avl_data.forEach((vehicle: VehicleAvlData) => {
-              allVehicles.push({
-                ...vehicle,
-                vehicle_id: vehicleGroup.vehicle_id || vehicle.vehicle_id
-              });
+            vehicleGroup.avl_data.forEach((vehicle: any) => {
+              // Handle the actual API structure
+              const processedVehicle: VehicleAvlData = {
+                id: vehicle.id || 0,
+                adid: vehicle.adid,
+                vehicle_id: vehicleGroup.vehicle_id || vehicle.vehicle_id,
+                driver_id: vehicleGroup.driver_id || vehicle.driver_id,
+                segment_id: vehicleGroup.segment_id || vehicle.segment_id,
+                record_date: vehicle.record_date,
+                record_time: vehicle.record_time,
+                lat: vehicle.lat,
+                lng: vehicle.lng,
+                speed: vehicle.speed,
+                angle: vehicle.angle,
+                direction: vehicle.direction,
+                device_time: vehicle.device_time,
+                // For backward compatibility, also set the old field names
+                latitude: vehicle.lat,
+                longitude: vehicle.lng,
+                heading: vehicle.angle || vehicle.direction,
+                timestamp: vehicle.record_time ? 
+                  `${vehicle.record_date} ${vehicle.record_time}` : 
+                  new Date().toISOString()
+              };
+              
+              allVehicles.push(processedVehicle);
             });
           }
         });
