@@ -263,6 +263,109 @@ export const apiService = {
         routes: []
       };
     }
+  },
+
+  // New method to fetch GeoJSON-style polyline data
+  async getGeoJSONPolylines() {
+    try {
+      const response = await fetchWithCORS(`${BASE_URL}/GetRoutePolyline?data=ALL`);
+      const data = await response.json();
+      
+      console.log('Raw polyline API response:', data);
+      
+      if (data?.status === 'OK' && data.result && Array.isArray(data.result)) {
+        // Return the data in the format expected by the polyline utilities
+        return {
+          cmd_name: data.cmd_name || "GetRoutePolyline",
+          status: data.status,
+          result: data.result.map((item: any, index: number) => {
+            console.log(`Processing polyline item ${index}:`, item);
+            
+            // Handle the actual data structure you provided
+            return {
+              idx: item.idx !== undefined ? item.idx : index,
+              segment_id: item.segment_id || `ROUTE_${index}`,
+              polyline_latlng: {
+                features: [{
+                  geometry: {
+                    type: "LineString",
+                    coordinates: this.extractCoordinatesFromPolylineData(item)
+                  },
+                  properties: {
+                    name: item.segment_id || `Route ${index + 1}`,
+                    type: "Feature"
+                  }
+                }],
+                type: "FeatureCollection"
+              },
+              polyline_style: {
+                color: item.polyline_style?.color || item.color || '#3b82f6',
+                weight: item.polyline_style?.weight || 5,
+                opacity: item.polyline_style?.opacity || 1
+              }
+            };
+          })
+        };
+      }
+      
+      console.warn('Invalid polyline response structure:', data);
+      return {
+        cmd_name: "GetRoutePolyline",
+        status: "OK",
+        result: []
+      };
+    } catch (error) {
+      console.error('Failed to fetch GeoJSON polylines:', error);
+      return {
+        cmd_name: "GetRoutePolyline",
+        status: "ERROR",
+        result: []
+      };
+    }
+  },
+
+  // Helper method to extract coordinates from various possible data structures
+  extractCoordinatesFromPolylineData(item: any): number[][] {
+    try {
+      // Method 1: Check for the structure you described: polyline_latlng.features[0].geometry.coordinates
+      if (item.polyline_latlng?.features?.[0]?.geometry?.coordinates) {
+        const coords = item.polyline_latlng.features[0].geometry.coordinates;
+        console.log('Found coordinates in polyline_latlng.features[0].geometry.coordinates:', coords.length);
+        
+        // Handle your format: each coordinate is [lng, lat, elevation]
+        return coords.map((coord: any) => {
+          if (Array.isArray(coord) && coord.length >= 2) {
+            return [coord[0], coord[1]]; // [longitude, latitude]
+          }
+          console.warn('Invalid coordinate format:', coord);
+          return [0, 0];
+        });
+      }
+      
+      // Method 2: Check for direct coordinates array
+      if (item.coordinates && Array.isArray(item.coordinates)) {
+        console.log('Found coordinates in direct coordinates array:', item.coordinates.length);
+        return item.coordinates.map((coord: any) => {
+          if (Array.isArray(coord) && coord.length >= 2) {
+            return [coord[0], coord[1]];
+          }
+          return [0, 0];
+        });
+      }
+      
+      // Method 3: Check for encoded polyline string
+      if (item.polyline && typeof item.polyline === 'string') {
+        console.log('Found encoded polyline string, length:', item.polyline.length);
+        // This would need to be decoded - for now return empty
+        return [];
+      }
+      
+      console.warn('No coordinates found in polyline item:', item);
+      return [];
+    } catch (error) {
+      console.error('Error extracting coordinates:', error);
+      return [];
+    }
   }
 };
 
