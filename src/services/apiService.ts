@@ -3,7 +3,26 @@ const BASE_URL = 'https://tracker_baym.hbssweb.com';
 // Base64 decode helper
 const decodeBase64 = (encodedData: string) => {
   try {
-    return JSON.parse(atob(encodedData));
+    // Validate the string before attempting to decode
+    if (!encodedData || typeof encodedData !== 'string') {
+      throw new Error('Invalid input: data is not a string');
+    }
+    
+    // Clean the string (remove any whitespace/newlines)
+    const cleanedData = encodedData.trim();
+    
+    if (cleanedData.length === 0) {
+      throw new Error('Invalid input: empty string');
+    }
+    
+    // Validate base64 format
+    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+    if (!base64Regex.test(cleanedData)) {
+      throw new Error('Invalid base64 format');
+    }
+    
+    const decoded = atob(cleanedData);
+    return JSON.parse(decoded);
   } catch (error) {
     console.error('Failed to decode base64 data:', error);
     return null;
@@ -129,9 +148,22 @@ export const apiService = {
   async getAvlData() {
     try {
       const response = await fetchWithCORS(`${BASE_URL}/GetAvlData?data=ALL`);
-      const encodedData = await response.text();
-      const decodedData = decodeBase64(encodedData);
-      console.log('AVL Data decoded:', decodedData);
+      const responseText = await response.text();
+      
+      // Try to parse as JSON first, fallback to base64 decode if needed
+      let decodedData;
+      try {
+        decodedData = JSON.parse(responseText);
+      } catch {
+        // If not JSON, try base64 decode
+        if (responseText && responseText.length > 0) {
+          decodedData = decodeBase64(responseText);
+        } else {
+          throw new Error('Empty response');
+        }
+      }
+      
+      console.log('AVL Data:', decodedData);
       return decodedData;
     } catch (error) {
       console.error('Failed to fetch AVL data, using mock data:', error);
@@ -234,21 +266,33 @@ export const apiService = {
       if (data?.status === 'OK' && data.result) {
         return {
           status: 'OK',
-          routes: data.result.map((routeData: any) => ({
-            segment_id: routeData.segment_id,
-            route_name: routeData.route_name || routeData.segment_id,
-            color: routeData.color || '#3b82f6',
-            coordinates: routeData.coordinates || [],
-            polyline: routeData.polyline || '',
-            stops: routeData.stops?.map((stop: any) => ({
-              id: stop.stop_id || stop.id,
-              name: stop.stop_name || stop.name,
-              latitude: parseFloat(stop.latitude || stop.lat),
-              longitude: parseFloat(stop.longitude || stop.lng),
-              eta: stop.eta || null,
-              sequence: stop.sequence || 0
-            })).sort((a: any, b: any) => a.sequence - b.sequence) || []
-          }))
+          routes: data.result.map((routeData: any) => {
+            // Extract coordinates from the nested structure: polyline_latlng.feature[0].geometry.coordinates[]
+            let coordinates: any[] = [];
+            
+            if (routeData.polyline_latlng?.feature?.[0]?.geometry?.coordinates) {
+              coordinates = routeData.polyline_latlng.feature[0].geometry.coordinates;
+              console.log(`Found ${coordinates.length} coordinates for route ${routeData.route_name}`, coordinates.slice(0, 3));
+            } else if (routeData.coordinates?.length > 0) {
+              coordinates = routeData.coordinates;
+            }
+
+            return {
+              segment_id: routeData.segment_id,
+              route_name: routeData.route_name || routeData.segment_id,
+              color: routeData.color || '#3b82f6',
+              coordinates: coordinates,
+              polyline: routeData.polyline || '',
+              stops: routeData.stops?.map((stop: any) => ({
+                id: stop.stop_id || stop.id,
+                name: stop.stop_name || stop.name,
+                latitude: parseFloat(stop.latitude || stop.lat),
+                longitude: parseFloat(stop.longitude || stop.lng),
+                eta: stop.eta || null,
+                sequence: stop.sequence || 0
+              })).sort((a: any, b: any) => a.sequence - b.sequence) || []
+            };
+          })
         };
       }
       

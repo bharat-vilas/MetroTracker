@@ -64,10 +64,23 @@ export function isEncodedPolyline(str: string): boolean {
 export function processPolylineData(data: any): [number, number][] {
   // If it's already an array of coordinates
   if (Array.isArray(data)) {
-    return data.map((coord: any) => [
-      parseFloat(coord.lat || coord.latitude),
-      parseFloat(coord.lng || coord.longitude)
-    ]);
+    return data.map((coord: any) => {
+      // Handle different coordinate formats
+      if (Array.isArray(coord)) {
+        // GeoJSON format: [longitude, latitude] -> [latitude, longitude]
+        if (coord.length >= 2) {
+          const [lng, lat] = coord;
+          return [parseFloat(lat), parseFloat(lng)];
+        }
+      } else if (typeof coord === 'object') {
+        // Object format: {lat, lng} or {latitude, longitude}
+        return [
+          parseFloat(coord.lat || coord.latitude),
+          parseFloat(coord.lng || coord.longitude)
+        ];
+      }
+      return [0, 0]; // fallback
+    });
   }
   
   // If it's an encoded polyline string

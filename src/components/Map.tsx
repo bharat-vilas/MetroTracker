@@ -213,9 +213,12 @@ const MapComponent: React.FC<MapProps> = ({ selectedRoute, onVehicleSelect, sele
 
           // Process coordinates - handle both encoded polylines and coordinate arrays
           if (routePolylineData.coordinates && routePolylineData.coordinates.length > 0) {
+            console.log(`Processing coordinates for route ${route.name}:`, routePolylineData.coordinates.slice(0, 3));
             coordinates = processPolylineData(routePolylineData.coordinates);
+            console.log(`Processed coordinates:`, coordinates.slice(0, 3));
           } else if (routePolylineData.polyline) {
             // Try to decode polyline string
+            console.log(`Processing polyline string for route ${route.name}:`, routePolylineData.polyline.substring(0, 50));
             coordinates = processPolylineData(routePolylineData.polyline);
           }
 
