@@ -1,11 +1,29 @@
 const BASE_URL = 'https://tracker_baym.hbssweb.com';
 
-// Base64 decode helper
+// Base64 decode helper with improved error handling
 const decodeBase64 = (encodedData: string) => {
   try {
-    return JSON.parse(atob(encodedData));
+    // Check if the data looks like base64
+    if (!encodedData || encodedData.trim().length === 0) {
+      console.warn('Empty encoded data provided');
+      return null;
+    }
+    
+    // Remove any whitespace and check if it's valid base64 format
+    const cleanedData = encodedData.trim();
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(cleanedData)) {
+      console.warn('Data does not appear to be valid base64:', cleanedData.substring(0, 100));
+      return null;
+    }
+    
+    const decodedString = atob(cleanedData);
+    const parsedData = JSON.parse(decodedString);
+    
+    console.log('Successfully decoded base64 data');
+    return parsedData;
   } catch (error) {
     console.error('Failed to decode base64 data:', error);
+    console.error('Input data (first 100 chars):', encodedData?.substring(0, 100));
     return null;
   }
 };
@@ -129,13 +147,53 @@ export const apiService = {
   async getAvlData() {
     try {
       const response = await fetchWithCORS(`${BASE_URL}/GetAvlData?data=ALL`);
-      const encodedData = await response.text();
-      const decodedData = decodeBase64(encodedData);
-      console.log('AVL Data decoded:', decodedData);
-      return decodedData;
+      
+      // Check response status first
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      console.log('AVL Data response content-type:', contentType);
+      
+      // Handle different response types
+      let data;
+      if (contentType && contentType.includes('application/json')) {
+        // Direct JSON response
+        data = await response.json();
+        console.log('AVL Data direct JSON:', data);
+        return data;
+      } else {
+        // Try as base64 encoded text
+        const encodedData = await response.text();
+        console.log('AVL Data raw response (first 200 chars):', encodedData.substring(0, 200));
+        
+        // Check if it's actually base64 encoded
+        if (encodedData && !encodedData.startsWith('<') && !encodedData.startsWith('{')) {
+          const decodedData = decodeBase64(encodedData);
+          if (decodedData) {
+            console.log('AVL Data decoded successfully:', decodedData);
+            return decodedData;
+          }
+        } else {
+          // Try parsing as direct JSON
+          try {
+            data = JSON.parse(encodedData);
+            console.log('AVL Data parsed as JSON:', data);
+            return data;
+          } catch (parseError) {
+            console.warn('Failed to parse response as JSON:', parseError);
+          }
+        }
+      }
+      
+      // If we get here, something went wrong
+      console.warn('Unable to process AVL data response, using mock data');
+      throw new Error('Invalid response format');
+      
     } catch (error) {
       console.error('Failed to fetch AVL data, using mock data:', error);
-      // Return mock AVL data for development
+      // Return mock AVL data for development matching the actual API structure
       return {
         cmd_name: "GetAvlData",
         status: "OK",
@@ -147,27 +205,39 @@ export const apiService = {
             segment_id: "ROUTE 01 Weekday",
             avl_data: [{
               id: 0,
+              adid: -1,
               vehicle_id: "V247",
-              latitude: 42.3601,
-              longitude: -71.0589,
+              driver_id: "TVAN",
+              segment_id: "ROUTE 01 Weekday",
+              record_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-').toUpperCase(),
+              record_time: new Date().toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' }) + 'A',
+              lat: 42.3601,
+              lng: -71.0589,
               speed: 25,
-              heading: 180,
-              timestamp: new Date().toISOString()
+              angle: 180,
+              direction: 180,
+              device_time: new Date().toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' }) + 'A'
             }]
           },
           {
             idx: 1,
             vehicle_id: "V241",
-            driver_id: "ZREM",
-            segment_id: "ROUTE 02 Weekday", 
+            driver_id: "SSCO",
+            segment_id: "ROUTE 01 Weekday", 
             avl_data: [{
               id: 1,
+              adid: -1,
               vehicle_id: "V241",
-              latitude: 42.3651,
-              longitude: -71.0639,
-              speed: 30,
-              heading: 90,
-              timestamp: new Date().toISOString()
+              driver_id: "SSCO",
+              segment_id: "ROUTE 01 Weekday",
+              record_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-').toUpperCase(),
+              record_time: new Date().toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' }) + 'A',
+              lat: 43.60191,
+              lng: -83.88615,
+              speed: 0,
+              angle: 141,
+              direction: 141,
+              device_time: new Date().toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' }) + 'A'
             }]
           }
         ]
@@ -412,12 +482,22 @@ export interface DisconnectedSegmentsResponse {
 
 export interface VehicleAvlData {
   id: number;
+  adid?: number;
   vehicle_id: string;
-  latitude: number;
-  longitude: number;
+  driver_id?: string;
+  segment_id?: string;
+  record_date?: string;
+  record_time?: string;
+  lat: number;          // Changed from latitude
+  lng: number;          // Changed from longitude
   speed?: number;
-  heading?: number;
-  timestamp: string;
+  angle?: number;       // Added angle field
+  direction?: number;   // Added direction field
+  device_time?: string; // Added device_time field
+  heading?: number;     // Keep for backward compatibility
+  latitude?: number;    // Keep for backward compatibility
+  longitude?: number;   // Keep for backward compatibility
+  timestamp?: string;   // Keep for backward compatibility
 }
 
 export interface AvlDataResponse {

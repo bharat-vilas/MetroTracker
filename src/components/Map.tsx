@@ -38,6 +38,8 @@ const MapComponent: React.FC<MapProps> = ({
   const vehicleMarkersRef = useRef(new Map<string, L.Marker>());
   const [vehicles, setVehicles] = useState<VehicleAvlData[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const polylinesDrawnRef = useRef<boolean>(false); // Track if polylines are already drawn
+  const currentPolylineDataRef = useRef<PolylineResponse | null>(null); // Track current polyline data
 
   // Route colors for different routes (fallback)
   const routeColors = [
@@ -103,6 +105,8 @@ const MapComponent: React.FC<MapProps> = ({
         }
       });
       routeLinesRef.current = [];
+      polylinesDrawnRef.current = false;
+      currentPolylineDataRef.current = null;
     }
 
     // Clear stop markers only if requested
@@ -114,6 +118,13 @@ const MapComponent: React.FC<MapProps> = ({
       });
       markersRef.current = [];
     }
+  }, []);
+
+  // Function to preserve polylines when only updating vehicle data
+  const preservePolylines = useCallback(() => {
+    console.log('Preserving polylines during vehicle update');
+    // This function intentionally does nothing to preserve existing polylines
+    return;
   }, []);
 
   // Clear all map elements (for complete cleanup)
@@ -142,7 +153,7 @@ const MapComponent: React.FC<MapProps> = ({
       if (existingMarker) {
         // Smooth transition to new position
         const currentLatLng = existingMarker.getLatLng();
-        const newLatLng = L.latLng(vehicle.latitude, vehicle.longitude);
+        const newLatLng = L.latLng(vehicle.lat || vehicle.latitude || 0, vehicle.lng || vehicle.longitude || 0);
         
         // Animate the marker to the new position
         let start = Date.now();
@@ -168,15 +179,18 @@ const MapComponent: React.FC<MapProps> = ({
         animate();
       } else {
         // Create new marker
-        const marker = L.marker([vehicle.latitude, vehicle.longitude], {
+        const marker = L.marker([vehicle.lat || vehicle.latitude || 0, vehicle.lng || vehicle.longitude || 0], {
           icon: createVehicleIcon(vehicle.vehicle_id, vehicle.speed || 0)
         })
         .bindPopup(`
           <div class="p-2">
             <h3 class="font-bold">${vehicle.vehicle_id}</h3>
+            <p class="text-sm">Driver: ${vehicle.driver_id || 'N/A'}</p>
+            <p class="text-sm">Route: ${vehicle.segment_id || 'N/A'}</p>
             <p class="text-sm">Speed: ${vehicle.speed || 'N/A'} km/h</p>
-            <p class="text-sm">Heading: ${vehicle.heading || 'N/A'}°</p>
-            <p class="text-xs text-gray-500">Updated: ${new Date(vehicle.timestamp).toLocaleTimeString()}</p>
+            <p class="text-sm">Direction: ${vehicle.angle || vehicle.direction || vehicle.heading || 'N/A'}°</p>
+            <p class="text-xs text-gray-500">Updated: ${vehicle.record_time || vehicle.device_time || 'N/A'}</p>
+            <p class="text-xs text-gray-500">Date: ${vehicle.record_date || 'N/A'}</p>
           </div>
         `)
         .addTo(mapRef.current);
@@ -505,9 +519,10 @@ const MapComponent: React.FC<MapProps> = ({
     }
   }, [clearRouteElements, createStopMarker, routeColors, drawPolylinesFromGeoJSON]);
 
-  // Fetch all vehicles
+  // Fetch all vehicles - independent of polyline management
   const fetchAllVehicles = useCallback(async () => {
     try {
+      console.log('Fetching vehicle data (preserving polylines)');
       const avlData = await apiService.getAvlData();
       
       if (avlData?.result) {
@@ -515,38 +530,66 @@ const MapComponent: React.FC<MapProps> = ({
         
         avlData.result.forEach((vehicleGroup: any) => {
           if (vehicleGroup.avl_data && Array.isArray(vehicleGroup.avl_data)) {
-            vehicleGroup.avl_data.forEach((vehicle: VehicleAvlData) => {
-              allVehicles.push({
-                ...vehicle,
-                vehicle_id: vehicleGroup.vehicle_id || vehicle.vehicle_id
-              });
+            vehicleGroup.avl_data.forEach((vehicle: any) => {
+              // Handle the actual API structure
+              const processedVehicle: VehicleAvlData = {
+                id: vehicle.id || 0,
+                adid: vehicle.adid,
+                vehicle_id: vehicleGroup.vehicle_id || vehicle.vehicle_id,
+                driver_id: vehicleGroup.driver_id || vehicle.driver_id,
+                segment_id: vehicleGroup.segment_id || vehicle.segment_id,
+                record_date: vehicle.record_date,
+                record_time: vehicle.record_time,
+                lat: vehicle.lat,
+                lng: vehicle.lng,
+                speed: vehicle.speed,
+                angle: vehicle.angle,
+                direction: vehicle.direction,
+                device_time: vehicle.device_time,
+                // For backward compatibility, also set the old field names
+                latitude: vehicle.lat,
+                longitude: vehicle.lng,
+                heading: vehicle.angle || vehicle.direction,
+                timestamp: vehicle.record_time ? 
+                  `${vehicle.record_date} ${vehicle.record_time}` : 
+                  new Date().toISOString()
+              };
+              
+              allVehicles.push(processedVehicle);
             });
           }
         });
         
+        // Update vehicles without affecting polylines
         setVehicles(allVehicles);
         updateVehicleMarkers(allVehicles);
+        console.log(`Updated ${allVehicles.length} vehicle markers, polylines preserved`);
+      } else {
+        console.warn('No AVL data received');
       }
     } catch (error) {
       console.error('Failed to fetch vehicles:', error);
     }
   }, [updateVehicleMarkers]);
 
-  // Start vehicle tracking
+  // Start vehicle tracking - optimized to prevent map reloading
   const startVehicleTracking = useCallback(() => {
-    console.log('Starting vehicle tracking');
+    console.log('Starting vehicle tracking (polylines will remain intact)');
+    
+    // Clear any existing interval to prevent multiple intervals
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     
     // Initial fetch
     fetchAllVehicles();
     
     // Set up interval for regular updates
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    
     intervalRef.current = setInterval(() => {
+      console.log('Interval update: fetching vehicles only');
       fetchAllVehicles();
-    }, 3000); // Update every 3 seconds for more responsive tracking
+    }, 5000); // Update every 5 seconds to reduce load and prevent excessive rerendering
   }, [fetchAllVehicles]);
 
   // Stop vehicle tracking
@@ -585,29 +628,56 @@ const MapComponent: React.FC<MapProps> = ({
 
     // Cleanup function
     return () => {
-      console.log('Cleaning up map');
+      console.log('Cleaning up map and preventing memory leaks');
       stopVehicleTracking();
       clearMapElements();
       clearVehicleMarkers();
+      
+      // Ensure interval is cleared
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
       
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
+      
+      // Reset polyline tracking flags
+      polylinesDrawnRef.current = false;
+      currentPolylineDataRef.current = null;
     };
   }, [startVehicleTracking, stopVehicleTracking, clearMapElements, clearVehicleMarkers]);
 
-  // Handle polyline data changes (new primary method)
+  // Handle polyline data changes (new primary method) - with independence from vehicle updates
   useEffect(() => {
     const updatePolylines = async () => {
+      // Check if polyline data has actually changed
+      const hasPolylineDataChanged = JSON.stringify(currentPolylineDataRef.current) !== JSON.stringify(polylineData);
+      
       if (polylineData && polylineData.result) {
-        console.log('Polyline data provided, drawing from GeoJSON structure');
-        await drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
+        // Only redraw if data has changed or polylines haven't been drawn yet
+        if (hasPolylineDataChanged || !polylinesDrawnRef.current) {
+          console.log('Polyline data provided and changed, drawing from GeoJSON structure');
+          currentPolylineDataRef.current = polylineData;
+          await drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
+          polylinesDrawnRef.current = true;
+        } else {
+          console.log('Polyline data unchanged, preserving existing polylines');
+        }
       } else if (selectedRoutesForMap && selectedRoutesForMap.length > 0) {
-        console.log('No polyline data provided, falling back to legacy API');
-        await drawRoutePaths(selectedRoutesForMap);
-      } else {
-        // Only clear route elements, keep vehicles
+        // Only redraw if routes have changed or polylines haven't been drawn yet
+        if (!polylinesDrawnRef.current) {
+          console.log('No polyline data provided, falling back to legacy API');
+          await drawRoutePaths(selectedRoutesForMap);
+          polylinesDrawnRef.current = true;
+        } else {
+          console.log('Routes unchanged, preserving existing polylines');
+        }
+      } else if (selectedRoutesForMap.length === 0 && polylinesDrawnRef.current) {
+        // Only clear if we have no routes selected and polylines were previously drawn
+        console.log('No routes selected, clearing polylines');
         clearRouteElements(true, true);
       }
     };
