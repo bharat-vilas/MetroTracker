@@ -52,51 +52,75 @@ const MapComponent: React.FC<MapProps> = ({
   });
 
   // Custom vehicle icon creator
-  const createVehicleIcon = () => {
-    const color = '#22c55e'; // Green for active vehicles
+  const createVehicleIcon = (vehicleId: string, speed: number = 0) => {
+    const color = '#ff6b35'; // Orange/red for active vehicles (more distinctive)
+    const isMoving = speed > 0;
     
     return L.divIcon({
       html: `<div style="
-        width: 16px; 
-        height: 16px; 
-        background-color: ${color}; 
-        border: 2px solid white; 
+        width: 20px; 
+        height: 20px; 
+        background: linear-gradient(45deg, ${color}, #ff8c42); 
+        border: 3px solid white; 
         border-radius: 50%; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        animation: pulse 2s infinite;
-      "></div>
+        box-shadow: 0 3px 6px rgba(0,0,0,0.4);
+        position: relative;
+        ${isMoving ? 'animation: vehiclePulse 1.5s infinite;' : ''}
+      ">
+        <div style="
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          color: white;
+          font-size: 8px;
+          font-weight: bold;
+          text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+        ">🚌</div>
+      </div>
       <style>
-        @keyframes pulse {
-          0% { transform: scale(1); }
-          50% { transform: scale(1.2); }
-          100% { transform: scale(1); }
+        @keyframes vehiclePulse {
+          0% { transform: scale(1); box-shadow: 0 3px 6px rgba(0,0,0,0.4); }
+          50% { transform: scale(1.15); box-shadow: 0 4px 8px rgba(255,107,53,0.6); }
+          100% { transform: scale(1); box-shadow: 0 3px 6px rgba(0,0,0,0.4); }
         }
       </style>`,
-      className: 'vehicle-marker',
-      iconSize: [20, 20],
-      iconAnchor: [10, 10]
+      className: `vehicle-marker vehicle-${vehicleId}`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
     });
   };
 
-  // Clear all map elements
-  const clearMapElements = useCallback(() => {
-    console.log('Clearing map elements');
-    // Clear route polylines
-    routeLinesRef.current.forEach(line => {
-      if (mapRef.current) {
-        mapRef.current.removeLayer(line);
-      }
-    });
-    routeLinesRef.current = [];
+  // Clear specific route elements (updated to be more selective)
+  const clearRouteElements = useCallback((clearPolylines = true, clearStops = true) => {
+    console.log('Clearing route elements', { clearPolylines, clearStops });
+    
+    // Clear route polylines only if requested
+    if (clearPolylines) {
+      routeLinesRef.current.forEach(line => {
+        if (mapRef.current) {
+          mapRef.current.removeLayer(line);
+        }
+      });
+      routeLinesRef.current = [];
+    }
 
-    // Clear stop markers
-    markersRef.current.forEach(marker => {
-      if (mapRef.current) {
-        mapRef.current.removeLayer(marker);
-      }
-    });
-    markersRef.current = [];
+    // Clear stop markers only if requested
+    if (clearStops) {
+      markersRef.current.forEach(marker => {
+        if (mapRef.current) {
+          mapRef.current.removeLayer(marker);
+        }
+      });
+      markersRef.current = [];
+    }
   }, []);
+
+  // Clear all map elements (for complete cleanup)
+  const clearMapElements = useCallback(() => {
+    console.log('Clearing all map elements');
+    clearRouteElements(true, true);
+  }, [clearRouteElements]);
 
   // Clear vehicle markers
   const clearVehicleMarkers = useCallback(() => {
@@ -145,7 +169,7 @@ const MapComponent: React.FC<MapProps> = ({
       } else {
         // Create new marker
         const marker = L.marker([vehicle.latitude, vehicle.longitude], {
-          icon: createVehicleIcon()
+          icon: createVehicleIcon(vehicle.vehicle_id, vehicle.speed || 0)
         })
         .bindPopup(`
           <div class="p-2">
@@ -176,24 +200,37 @@ const MapComponent: React.FC<MapProps> = ({
   }, [onVehicleSelect]);
 
   // Create stop marker with color
-  const createStopMarker = useCallback((color: string) => {
+  const createStopMarker = useCallback((color: string, stopIndex?: number) => {
+    const isFirstOrLast = stopIndex === 0 || stopIndex === -1;
+    const size = isFirstOrLast ? 16 : 12;
+    const borderWidth = isFirstOrLast ? 3 : 2;
+    
     return L.divIcon({
       html: `<div style="
-        width: 12px; 
-        height: 12px; 
+        width: ${size}px; 
+        height: ${size}px; 
         background-color: ${color}; 
-        border: 2px solid white; 
+        border: ${borderWidth}px solid white; 
         border-radius: 50%; 
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-      "></div>`,
-      className: 'stop-marker',
-      iconSize: [16, 16],
-      iconAnchor: [8, 8]
+        box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+        ${isFirstOrLast ? 'border-color: #333;' : ''}
+        ${isFirstOrLast ? 'animation: stopPulse 2s infinite;' : ''}
+      "></div>
+      <style>
+        @keyframes stopPulse {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.1); }
+          100% { transform: scale(1); }
+        }
+      </style>`,
+      className: `stop-marker ${isFirstOrLast ? 'terminal-stop' : 'regular-stop'}`,
+      iconSize: [size + borderWidth * 2, size + borderWidth * 2],
+      iconAnchor: [(size + borderWidth * 2) / 2, (size + borderWidth * 2) / 2]
     });
   }, []);
 
   // Draw polylines from GeoJSON-like data structure
-  const drawPolylinesFromGeoJSON = useCallback((polylineResponse: PolylineResponse, filterRoutes?: ApiRoute[]) => {
+  const drawPolylinesFromGeoJSON = useCallback(async (polylineResponse: PolylineResponse, filterRoutes?: ApiRoute[]) => {
     if (!mapRef.current || !polylineResponse?.result) {
       console.warn('Map not ready or no polyline data');
       return;
@@ -201,10 +238,51 @@ const MapComponent: React.FC<MapProps> = ({
 
     console.log('Drawing polylines from GeoJSON data:', polylineResponse.result.length);
 
-    clearMapElements();
+    // Only clear existing polylines and stops if we're showing different routes
+    clearRouteElements(true, true);
 
     const processedPolylines = processMultiplePolylines(polylineResponse);
     const allBounds: L.LatLngBounds[] = [];
+
+    // Fetch all stops for the routes we're about to draw
+    const routeStopsMap = new Map<string, RouteStop[]>();
+
+    // First, fetch stops for all routes that we're going to display
+    const routesToFetchStops = [];
+    if (filterRoutes && filterRoutes.length > 0) {
+      routesToFetchStops.push(...filterRoutes);
+    } else {
+      // Create route objects from polyline data for stop fetching
+      processedPolylines.forEach((polylineInfo) => {
+        routesToFetchStops.push({
+          id: polylineInfo.segmentId,
+          name: polylineInfo.name,
+          segment_id: polylineInfo.segmentId,
+          status: 'active',
+          startTime: '06:00',
+          endTime: '22:00'
+        } as ApiRoute);
+      });
+    }
+
+    // Fetch stops for all routes in parallel
+    try {
+      const stopPromises = routesToFetchStops.map(async (route) => {
+        try {
+          const stopsData = await apiService.getStopsForRoute(route.name);
+          if (stopsData?.stops) {
+            routeStopsMap.set(route.segment_id || route.id, stopsData.stops);
+          }
+        } catch (error) {
+          console.warn(`Failed to fetch stops for route ${route.name}:`, error);
+        }
+      });
+      
+      await Promise.all(stopPromises);
+      console.log('Fetched stops for routes:', Array.from(routeStopsMap.keys()));
+    } catch (error) {
+      console.warn('Error fetching route stops:', error);
+    }
 
     processedPolylines.forEach((polylineInfo, index) => {
       // If filtering by routes, check if this polyline matches any selected route
@@ -252,6 +330,40 @@ const MapComponent: React.FC<MapProps> = ({
 
         routeLinesRef.current.push(routeLine);
         allBounds.push(routeLine.getBounds());
+
+        // Add stop markers for this route
+        const routeStops = routeStopsMap.get(polylineInfo.segmentId);
+        if (routeStops && routeStops.length > 0) {
+          console.log(`Adding ${routeStops.length} stop markers for route ${polylineInfo.name}`);
+          
+          routeStops.forEach((stop, stopIndex) => {
+            // Mark first and last stops differently
+            const adjustedIndex = stopIndex === routeStops.length - 1 ? -1 : stopIndex;
+            const stopIcon = createStopMarker(polylineInfo.style.color, adjustedIndex);
+            const marker = L.marker([stop.latitude, stop.longitude], { icon: stopIcon })
+              .bindPopup(`
+                <div class="p-2">
+                  <h3 class="font-bold text-sm">${stop.name}</h3>
+                  <p class="text-xs text-gray-600">Route: ${polylineInfo.name}</p>
+                  <p class="text-xs">Stop ${stopIndex + 1} of ${routeStops.length}</p>
+                  ${stop.eta ? `<p class="text-xs font-medium text-primary">ETA: ${stop.eta}</p>` : ''}
+                  <div class="flex items-center mt-1">
+                    <div style="
+                      width: 8px; 
+                      height: 8px; 
+                      background-color: ${polylineInfo.style.color}; 
+                      border-radius: 50%; 
+                      margin-right: 4px;
+                    "></div>
+                    <span class="text-xs">Route Color</span>
+                  </div>
+                </div>
+              `)
+              .addTo(mapRef.current);
+
+            markersRef.current.push(marker);
+          });
+        }
       } else {
         console.warn(`No valid coordinates for polyline: ${polylineInfo.name}`);
       }
@@ -269,7 +381,7 @@ const MapComponent: React.FC<MapProps> = ({
         maxZoom: 15
       });
     }
-  }, [clearMapElements]);
+  }, [clearRouteElements, createStopMarker]);
 
   // Legacy method - Draw route paths on map using polyline API (kept for backward compatibility)
   const drawRoutePaths = useCallback(async (routes: ApiRoute[]) => {
@@ -277,7 +389,8 @@ const MapComponent: React.FC<MapProps> = ({
 
     console.log('Drawing route paths for routes:', routes.map(r => r.name));
 
-    clearMapElements();
+    // Only clear if we're showing different routes
+    clearRouteElements(true, true);
 
     try {
        // Use the new GeoJSON polyline API method
@@ -390,7 +503,7 @@ const MapComponent: React.FC<MapProps> = ({
     } catch (error) {
       console.error('Failed to fetch polyline data:', error);
     }
-  }, [clearMapElements, createStopMarker, routeColors, drawPolylinesFromGeoJSON]);
+  }, [clearRouteElements, createStopMarker, routeColors, drawPolylinesFromGeoJSON]);
 
   // Fetch all vehicles
   const fetchAllVehicles = useCallback(async () => {
@@ -433,7 +546,7 @@ const MapComponent: React.FC<MapProps> = ({
     
     intervalRef.current = setInterval(() => {
       fetchAllVehicles();
-    }, 5000); // Update every 5 seconds
+    }, 3000); // Update every 3 seconds for more responsive tracking
   }, [fetchAllVehicles]);
 
   // Stop vehicle tracking
@@ -486,16 +599,21 @@ const MapComponent: React.FC<MapProps> = ({
 
   // Handle polyline data changes (new primary method)
   useEffect(() => {
-    if (polylineData && polylineData.result) {
-      console.log('Polyline data provided, drawing from GeoJSON structure');
-      drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
-    } else if (selectedRoutesForMap && selectedRoutesForMap.length > 0) {
-      console.log('No polyline data provided, falling back to legacy API');
-      drawRoutePaths(selectedRoutesForMap);
-    } else {
-      clearMapElements();
-    }
-  }, [polylineData, selectedRoutesForMap, drawPolylinesFromGeoJSON, drawRoutePaths, clearMapElements]);
+    const updatePolylines = async () => {
+      if (polylineData && polylineData.result) {
+        console.log('Polyline data provided, drawing from GeoJSON structure');
+        await drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
+      } else if (selectedRoutesForMap && selectedRoutesForMap.length > 0) {
+        console.log('No polyline data provided, falling back to legacy API');
+        await drawRoutePaths(selectedRoutesForMap);
+      } else {
+        // Only clear route elements, keep vehicles
+        clearRouteElements(true, true);
+      }
+    };
+
+    updatePolylines();
+  }, [polylineData, selectedRoutesForMap, drawPolylinesFromGeoJSON, drawRoutePaths, clearRouteElements]);
 
   return (
     <div className="relative flex-1 h-full">
