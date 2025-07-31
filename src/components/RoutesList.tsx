@@ -258,8 +258,8 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
                             </Select>
                           </div>
 
-                          <ScrollArea className="h-[600px] pr-4 overflow-y-auto">
-                            <div className="space-y-1 max-h-[600px]">
+                          <ScrollArea className="h-[400px] pr-4 overflow-y-auto">
+                            <div className="space-y-1">
                               {/* Header row */}
                               <div className="grid grid-cols-2 gap-4 p-3 bg-muted/50 rounded-lg font-medium text-sm">
                                 <div>Stop Name</div>
