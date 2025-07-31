@@ -28,33 +28,138 @@ const decodeBase64 = (encodedData: string) => {
   }
 };
 
-// CORS proxy fallback for development
-const fetchWithCORS = async (url: string) => {
+// CORS proxy configuration with multiple fallback options
+const CORS_PROXIES = [
+  'https://cors-anywhere.herokuapp.com/',
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?'
+];
+
+// Request cache to prevent excessive API calls
+const apiCache = new Map<string, { data: any; timestamp: number; ttl: number }>();
+
+// Cache TTL settings (in milliseconds)
+const CACHE_TTL = {
+  ROUTES: 5 * 60 * 1000,        // 5 minutes
+  STOPS: 10 * 60 * 1000,        // 10 minutes  
+  POLYLINES: 15 * 60 * 1000,    // 15 minutes
+  AVL_DATA: 0,                  // No cache for real-time data
+  SEGMENTS: 2 * 60 * 1000       // 2 minutes
+};
+
+// Cache helper functions
+const getCacheKey = (endpoint: string, params?: string): string => {
+  return params ? `${endpoint}:${params}` : endpoint;
+};
+
+const getCachedData = (key: string): any | null => {
+  const cached = apiCache.get(key);
+  if (cached && Date.now() - cached.timestamp < cached.ttl) {
+    console.log(`Cache hit for: ${key}`);
+    return cached.data;
+  }
+  if (cached) {
+    apiCache.delete(key); // Remove expired cache
+  }
+  return null;
+};
+
+const setCachedData = (key: string, data: any, ttl: number): void => {
+  apiCache.set(key, {
+    data,
+    timestamp: Date.now(),
+    ttl
+  });
+  console.log(`Cached data for: ${key}, TTL: ${ttl}ms`);
+};
+
+// CORS proxy fallback with retry mechanism
+const fetchWithCORS = async (url: string, options?: RequestInit): Promise<Response> => {
+  const cacheKey = getCacheKey(url);
+  
+  // Check cache first (except for AVL data which should always be fresh)
+  if (!url.includes('GetAvlData')) {
+    const cachedData = getCachedData(cacheKey);
+    if (cachedData) {
+      return new Response(JSON.stringify(cachedData), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  }
+
+  console.log(`Attempting to fetch: ${url}`);
+  
+  // Try direct fetch first
   try {
-    // Try direct fetch first
     const response = await fetch(url, {
+      ...options,
       mode: 'cors',
       headers: {
         'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        ...options?.headers
       }
     });
-    return response;
-  } catch (error) {
-    console.error('CORS error:', error);
-    throw error;
+    
+    if (response.ok) {
+      console.log('Direct fetch successful');
+      return response;
+    }
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  } catch (directError) {
+    console.warn('Direct fetch failed:', directError);
+    
+    // Try CORS proxies as fallbacks
+    for (let i = 0; i < CORS_PROXIES.length; i++) {
+      const proxyUrl = `${CORS_PROXIES[i]}${encodeURIComponent(url)}`;
+      console.log(`Trying CORS proxy ${i + 1}/${CORS_PROXIES.length}: ${CORS_PROXIES[i]}`);
+      
+      try {
+        const response = await fetch(proxyUrl, {
+          ...options,
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            ...options?.headers
+          }
+        });
+        
+        if (response.ok) {
+          console.log(`CORS proxy ${i + 1} successful`);
+          return response;
+        } else {
+          console.warn(`CORS proxy ${i + 1} failed: ${response.status}`);
+        }
+      } catch (proxyError) {
+        console.warn(`CORS proxy ${i + 1} error:`, proxyError);
+        continue;
+      }
+    }
+    
+    // If all proxies fail, throw the original error with helpful message
+    throw new Error(`CORS Error: All fetch attempts failed. Original error: ${directError.message}. This might be due to:\n1. Server doesn't allow cross-origin requests\n2. CORS proxy services are down\n3. Network connectivity issues\n\nTry running the app from the same domain as the API, or configure the API server to allow CORS.`);
   }
 };
 
 // API service functions
 export const apiService = {
   async getRoutes() {
+    const cacheKey = getCacheKey('GetAllRoutes');
+    
     try {
+      // Check cache first
+      const cachedData = getCachedData(cacheKey);
+      if (cachedData) {
+        return cachedData;
+      }
+      
       // Get routes from new endpoint
       const response = await fetchWithCORS(`${BASE_URL}/GetAllRoutes`);
       const data = await response.json();
       
       if (data?.status === 'OK' && data.result) {
-        return {
+        const result = {
           status: 'OK',
           routes: data.result.map((route: any) => ({
             id: route.route_id || route.id,
@@ -65,6 +170,10 @@ export const apiService = {
             endTime: route.end_time ? Math.floor(route.end_time / 60).toString().padStart(2, '0') + ':' + (route.end_time % 60).toString().padStart(2, '0') : '22:00'
           }))
         };
+        
+        // Cache the result
+        setCachedData(cacheKey, result, CACHE_TTL.ROUTES);
+        return result;
       }
       return null;
     } catch (error) {
@@ -74,13 +183,21 @@ export const apiService = {
   },
 
   async getStopsForRoute(routeName: string) {
+    const cacheKey = getCacheKey('GetStopsData', routeName);
+    
     try {
+      // Check cache first
+      const cachedData = getCachedData(cacheKey);
+      if (cachedData) {
+        return cachedData;
+      }
+      
       const encodedRouteName = encodeURIComponent(routeName);
       const response = await fetchWithCORS(`${BASE_URL}/GetStopsData?data=${encodedRouteName}`);
       const data = await response.json();
       
       if (data?.status === 'OK' && data.result) {
-        return {
+        const result = {
           status: 'OK',
           stops: data.result.map((stop: any) => ({
             id: stop.stop_id || stop.id,
@@ -91,12 +208,20 @@ export const apiService = {
             sequence: stop.sequence || 0
           })).sort((a: any, b: any) => a.sequence - b.sequence)
         };
+        
+        // Cache the result
+        setCachedData(cacheKey, result, CACHE_TTL.STOPS);
+        return result;
       }
       
-      return {
+      const emptyResult = {
         status: 'OK',
         stops: []
       };
+      
+      // Cache empty results too to prevent repeated failed requests
+      setCachedData(cacheKey, emptyResult, CACHE_TTL.STOPS);
+      return emptyResult;
     } catch (error) {
       console.error('Failed to fetch stops for route:', error);
       return null;
@@ -127,6 +252,8 @@ export const apiService = {
 
   async getAvlData() {
     try {
+      // AVL data should always be fresh, no caching
+      console.log('Fetching fresh AVL data (real-time, no cache)');
       const response = await fetchWithCORS(`${BASE_URL}/GetAvlData?data=ALL`);
       
       // Check response status first
@@ -142,7 +269,7 @@ export const apiService = {
       if (contentType && contentType.includes('application/json')) {
         // Direct JSON response
         data = await response.json();
-        console.log('AVL Data direct JSON:', data);
+        console.log('AVL Data direct JSON received');
         return data;
       } else {
         // Try as base64 encoded text
@@ -153,14 +280,14 @@ export const apiService = {
         if (encodedData && !encodedData.startsWith('<') && !encodedData.startsWith('{')) {
           const decodedData = decodeBase64(encodedData);
           if (decodedData) {
-            console.log('AVL Data decoded successfully:', decodedData);
+            console.log('AVL Data decoded successfully');
             return decodedData;
           }
         } else {
           // Try parsing as direct JSON
           try {
             data = JSON.parse(encodedData);
-            console.log('AVL Data parsed as JSON:', data);
+            console.log('AVL Data parsed as JSON');
             return data;
           } catch (parseError) {
             console.warn('Failed to parse response as JSON:', parseError);
@@ -230,12 +357,20 @@ export const apiService = {
   },
 
   async getRoutePolyline() {
+    const cacheKey = getCacheKey('GetRoutePolyline');
+    
     try {
+      // Check cache first
+      const cachedData = getCachedData(cacheKey);
+      if (cachedData) {
+        return cachedData;
+      }
+      
       const response = await fetchWithCORS(`${BASE_URL}/GetRoutePolyline?data=ALL`);
       const data = await response.json();
       
       if (data?.status === 'OK' && data.result) {
-        return {
+        const result = {
           status: 'OK',
           routes: data.result.map((routeData: any) => ({
             segment_id: routeData.segment_id,
@@ -253,12 +388,20 @@ export const apiService = {
             })).sort((a: any, b: any) => a.sequence - b.sequence) || []
           }))
         };
+        
+        // Cache the result
+        setCachedData(cacheKey, result, CACHE_TTL.POLYLINES);
+        return result;
       }
       
-      return {
+      const emptyResult = {
         status: 'OK',
         routes: []
       };
+      
+      // Cache empty results
+      setCachedData(cacheKey, emptyResult, CACHE_TTL.POLYLINES);
+      return emptyResult;
     } catch (error) {
       console.error('Failed to fetch route polyline:', error);
       return {
@@ -270,7 +413,15 @@ export const apiService = {
 
   // New method to fetch GeoJSON-style polyline data
   async getGeoJSONPolylines() {
+    const cacheKey = getCacheKey('GetGeoJSONPolylines');
+    
     try {
+      // Check cache first
+      const cachedData = getCachedData(cacheKey);
+      if (cachedData) {
+        return cachedData;
+      }
+      
       const response = await fetchWithCORS(`${BASE_URL}/GetRoutePolyline?data=ALL`);
       const data = await response.json();
       
@@ -278,7 +429,7 @@ export const apiService = {
       
       if (data?.status === 'OK' && data.result && Array.isArray(data.result)) {
         // Return the data in the format expected by the polyline utilities
-        return {
+        const result = {
           cmd_name: data.cmd_name || "GetRoutePolyline",
           status: data.status,
           result: data.result.map((item: any, index: number) => {
@@ -309,14 +460,22 @@ export const apiService = {
             };
           })
         };
+        
+        // Cache the result
+        setCachedData(cacheKey, result, CACHE_TTL.POLYLINES);
+        return result;
       }
       
       console.warn('Invalid polyline response structure:', data);
-      return {
+      const emptyResult = {
         cmd_name: "GetRoutePolyline",
         status: "OK",
         result: []
       };
+      
+      // Cache empty results
+      setCachedData(cacheKey, emptyResult, CACHE_TTL.POLYLINES);
+      return emptyResult;
     } catch (error) {
       console.error('Failed to fetch GeoJSON polylines:', error);
       return {

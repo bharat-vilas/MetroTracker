@@ -4,6 +4,51 @@ import 'leaflet/dist/leaflet.css';
 import { apiService, ApiRoute, Vehicle, RouteStop } from '@/services/apiService';
 import { PolylineResponse, processMultiplePolylines } from '@/lib/polylineUtils';
 
+// Error notification component
+const ErrorNotification: React.FC<{ error: string; onDismiss: () => void }> = ({ error, onDismiss }) => (
+  <div className="absolute top-4 right-4 z-[1000] max-w-md bg-red-50 border border-red-200 rounded-lg p-4 shadow-lg">
+    <div className="flex items-start">
+      <div className="flex-shrink-0">
+        <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+        </svg>
+      </div>
+      <div className="ml-3 flex-1">
+        <h3 className="text-sm font-medium text-red-800">Connection Error</h3>
+        <p className="text-sm text-red-700 mt-1">{error}</p>
+        <div className="mt-2">
+          <button
+            onClick={onDismiss}
+            className="text-xs font-medium text-red-800 hover:text-red-700 underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+// Status indicator component
+const StatusIndicator: React.FC<{ status: 'connected' | 'error' | 'loading' }> = ({ status }) => {
+  const statusConfig = {
+    connected: { color: 'bg-green-500', text: 'Connected', pulse: false },
+    error: { color: 'bg-red-500', text: 'Connection Error', pulse: true },
+    loading: { color: 'bg-yellow-500', text: 'Connecting...', pulse: true }
+  };
+  
+  const config = statusConfig[status];
+  
+  return (
+    <div className="absolute top-4 left-4 z-[1000] bg-white rounded-lg shadow-md p-2">
+      <div className="flex items-center space-x-2">
+        <div className={`w-3 h-3 rounded-full ${config.color} ${config.pulse ? 'animate-pulse' : ''}`}></div>
+        <span className="text-sm font-medium text-gray-700">{config.text}</span>
+      </div>
+    </div>
+  );
+};
+
 // Fix for default markers in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -40,11 +85,16 @@ const MapComponent: React.FC<MapComponentProps> = ({
   const currentPolylineDataRef = useRef<PolylineResponse | null>(null); // Track current polyline data
   const currentSelectedRoutesRef = useRef<ApiRoute[]>([]); // Track current selected routes
   
-  // Add cache for route stops data to prevent repeated API calls
-  const routeStopsCacheRef = useRef<Map<string, RouteStop[]>>(new Map());
-  const lastFetchedRoutesRef = useRef<Set<string>>(new Set());
+  // Note: Route stops caching is now handled centrally in apiService
+  
+  // Add debounce and rate limiting
+  const lastPolylineUpdateRef = useRef<number>(0);
+  const lastVehicleUpdateRef = useRef<number>(0);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'error' | 'loading'>('loading');
 
   console.log('Map component rendering', { 
     selectedRoute: selectedRoute?.name, 
@@ -296,10 +346,10 @@ const MapComponent: React.FC<MapComponentProps> = ({
     const processedPolylines = processMultiplePolylines(polylineResponse);
     const allBounds: L.LatLngBounds[] = [];
 
-    // Optimize stops fetching with caching
+    // Fetch stops for routes (using apiService caching)
     const routeStopsMap = new Map<string, RouteStop[]>();
 
-    // First, determine which routes we need to fetch stops for
+    // Determine which routes we need stops for
     const routesToFetchStops = [];
     if (filterRoutes && filterRoutes.length > 0) {
       routesToFetchStops.push(...filterRoutes);
@@ -317,47 +367,34 @@ const MapComponent: React.FC<MapComponentProps> = ({
       });
     }
 
-    // Check cache first and only fetch missing routes
-            const routesNeedingFetch = [];
-        for (const route of routesToFetchStops) {
-          const cacheKey = route.segment_id || route.id;
-          if (routeStopsCacheRef.current.has(cacheKey)) {
-            // Use cached data
-            routeStopsMap.set(cacheKey, routeStopsCacheRef.current.get(cacheKey)!);
-            console.log(`Using cached stops for route: ${route.name}`);
-          } else {
-            // Need to fetch
-            routesNeedingFetch.push(route);
-          }
-        }
-
-        // Only fetch stops for routes not in cache
-        if (routesNeedingFetch.length > 0) {
-          console.log(`Fetching stops for ${routesNeedingFetch.length} routes not in cache`);
-          try {
-            const stopPromises = routesNeedingFetch.map(async (route) => {
-              try {
-                const stopsData = await apiService.getStopsForRoute(route.name);
-                if (stopsData?.stops && Array.isArray(stopsData.stops) && stopsData.stops.length > 0) {
-                  const cacheKey = route.segment_id || route.id;
-                  // Cache the data
-                  routeStopsCacheRef.current.set(cacheKey, stopsData.stops);
-                  // Add to current map
-                  routeStopsMap.set(cacheKey, stopsData.stops);
-                  console.log(`Cached stops for route: ${route.name}`);
-                } else {
-                  console.log(`No stops data available for route: ${route.name}`);
-                }
-              } catch (error) {
-                console.warn(`Failed to fetch stops for route ${route.name}:`, error);
+    // Fetch stops for routes only when needed (apiService handles caching automatically)
+    if (routesToFetchStops.length > 0) {
+      console.log(`Will fetch stops for ${routesToFetchStops.length} routes when drawing markers (cached by apiService)`);
+      
+      // Pre-fetch a few routes to populate cache, but don't block rendering
+      const priorityRoutes = routesToFetchStops.slice(0, 2); // Only first 2 routes
+      if (priorityRoutes.length > 0) {
+        console.log(`Pre-fetching stops for ${priorityRoutes.length} priority routes`);
+        try {
+          const stopPromises = priorityRoutes.map(async (route) => {
+            try {
+              const stopsData = await apiService.getStopsForRoute(route.name);
+              if (stopsData?.stops && Array.isArray(stopsData.stops) && stopsData.stops.length > 0) {
+                const cacheKey = route.segment_id || route.id;
+                routeStopsMap.set(cacheKey, stopsData.stops);
+                console.log(`Pre-fetched stops for route: ${route.name} (${stopsData.stops.length} stops)`);
               }
-            });
-            
-            await Promise.all(stopPromises);
-          } catch (error) {
-            console.warn('Error fetching route stops:', error);
-          }
+            } catch (error) {
+              console.warn(`Failed to pre-fetch stops for route ${route.name}:`, error);
+            }
+          });
+          
+          await Promise.all(stopPromises);
+        } catch (error) {
+          console.warn('Error pre-fetching priority route stops:', error);
         }
+      }
+    }
 
     processedPolylines.forEach((polylineInfo, index) => {
       // If filtering by routes, check if this polyline matches any selected route
@@ -406,8 +443,23 @@ const MapComponent: React.FC<MapComponentProps> = ({
         routeLinesRef.current.push(routeLine);
         allBounds.push(routeLine.getBounds());
 
-        // Add stop markers for this route
-        const routeStops = routeStopsMap.get(polylineInfo.segmentId);
+        // Add stop markers for this route (fetch on-demand if not in pre-fetch)
+        let routeStops = routeStopsMap.get(polylineInfo.segmentId);
+        
+        if (!routeStops) {
+          // Fetch stops on-demand (will use cache if available)
+          try {
+            console.log(`Fetching stops on-demand for route: ${polylineInfo.name}`);
+            const stopsData = await apiService.getStopsForRoute(polylineInfo.name);
+            if (stopsData?.stops && Array.isArray(stopsData.stops) && stopsData.stops.length > 0) {
+              routeStops = stopsData.stops;
+              routeStopsMap.set(polylineInfo.segmentId, routeStops);
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch stops on-demand for route ${polylineInfo.name}:`, error);
+          }
+        }
+        
         if (routeStops && routeStops.length > 0) {
           console.log(`Adding ${routeStops.length} stop markers for route ${polylineInfo.name}`);
           
@@ -458,30 +510,31 @@ const MapComponent: React.FC<MapComponentProps> = ({
     }
   }, [clearRouteElements, createStopMarker]);
 
-  // Legacy method - Draw route paths on map using polyline API (kept for backward compatibility)
+  // Legacy method - Draw route paths on map using polyline API (only called when no polylineData prop is available)
   const drawRoutePaths = useCallback(async (routes: ApiRoute[]) => {
     if (!mapRef.current || !routes.length) return;
 
-    console.log('Drawing route paths for routes:', routes.map(r => r.name));
+    console.log('Drawing route paths for routes (fallback API method):', routes.map(r => r.name));
+    console.warn('WARNING: Making API calls from Map component. Consider providing polylineData prop to avoid this.');
 
     // Only clear if we're showing different routes
     clearRouteElements(true, true);
 
     try {
        // Use the new GeoJSON polyline API method
-      const polylineData = await apiService.getGeoJSONPolylines();
+      const apiPolylineData = await apiService.getGeoJSONPolylines();
       
-      console.log('Fetched polyline data:', polylineData);
+      console.log('Fetched polyline data via fallback API call:', apiPolylineData);
       
-      if (!polylineData?.result || polylineData.result.length === 0) {
+      if (!apiPolylineData?.result || apiPolylineData.result.length === 0) {
         console.warn('No polyline data available from API');
         return;
       }
 
       // If we have polyline data, use the GeoJSON method
-      if (polylineData.result.length > 0) {
-        console.log('Using GeoJSON polyline method with API data');
-        drawPolylinesFromGeoJSON(polylineData, routes);
+      if (apiPolylineData.result.length > 0) {
+        console.log('Using GeoJSON polyline method with fallback API data');
+        drawPolylinesFromGeoJSON(apiPolylineData, routes);
         return;
       }
 
@@ -580,9 +633,18 @@ const MapComponent: React.FC<MapComponentProps> = ({
     }
   }, [clearRouteElements, createStopMarker, routeColors, drawPolylinesFromGeoJSON]);
 
-  // Fetch all vehicles - independent of polyline management
+  // Fetch all vehicles - independent of polyline management with rate limiting
   const fetchAllVehicles = useCallback(async () => {
+    // Rate limiting: only allow vehicle updates every 4 seconds minimum
+    const now = Date.now();
+    if (now - lastVehicleUpdateRef.current < 4000) {
+      console.log('Rate limiting: Skipping vehicle update (too frequent)');
+      return;
+    }
+    lastVehicleUpdateRef.current = now;
+    
     try {
+      setConnectionStatus('loading');
       console.log('Fetching vehicle data (preserving polylines)');
       const avlData = await apiService.getAvlData();
       
@@ -624,10 +686,13 @@ const MapComponent: React.FC<MapComponentProps> = ({
         // Update vehicles without affecting polylines
         setVehicles(allVehicles);
         updateVehicleMarkers(allVehicles);
+        setConnectionStatus('connected');
+        setConnectionError(null); // Clear any previous errors
         console.log(`Updated ${allVehicles.length} vehicle markers, polylines preserved`);
       } else {
         console.log('No vehicle data available from API');
         setVehicles([]);
+        setConnectionStatus('connected'); // API responded but no data
         // Clear existing vehicle markers when no data is available
         vehicleMarkersRef.current.forEach((marker) => {
           if (mapRef.current) {
@@ -639,6 +704,18 @@ const MapComponent: React.FC<MapComponentProps> = ({
     } catch (error) {
       console.error('Failed to fetch vehicles:', error);
       setVehicles([]);
+      setConnectionStatus('error');
+      
+      // Set user-friendly error message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      if (errorMessage.includes('CORS')) {
+        setConnectionError('Unable to connect to the tracking server. This may be due to browser security restrictions. Try refreshing the page or contact support.');
+      } else if (errorMessage.includes('fetch')) {
+        setConnectionError('Network connection error. Please check your internet connection and try again.');
+      } else {
+        setConnectionError('Server temporarily unavailable. Retrying automatically...');
+      }
+      
       // Clear existing vehicle markers on error
       vehicleMarkersRef.current.forEach((marker) => {
         if (mapRef.current) {
@@ -721,18 +798,23 @@ const MapComponent: React.FC<MapComponentProps> = ({
         mapRef.current = null;
       }
       
-      // Reset polyline tracking flags and clear caches
+      // Reset polyline tracking flags
       polylinesDrawnRef.current = false;
       currentPolylineDataRef.current = null;
       currentSelectedRoutesRef.current = [];
-      routeStopsCacheRef.current.clear();
-      lastFetchedRoutesRef.current.clear();
     };
   }, [startVehicleTracking, stopVehicleTracking, clearMapElements, clearVehicleMarkers]);
 
-  // Handle polyline data changes (new primary method) - with independence from vehicle updates
+  // Handle polyline data changes (new primary method) - with independence from vehicle updates and debouncing
   useEffect(() => {
     const updatePolylines = async () => {
+      // Rate limiting for polyline updates: minimum 2 seconds between updates
+      const now = Date.now();
+      if (now - lastPolylineUpdateRef.current < 2000) {
+        console.log('Rate limiting: Skipping polyline update (too frequent)');
+        return;
+      }
+      
       // Check if polyline data has actually changed
       const hasPolylineDataChanged = JSON.stringify(currentPolylineDataRef.current) !== JSON.stringify(polylineData);
       
@@ -742,7 +824,8 @@ const MapComponent: React.FC<MapComponentProps> = ({
       if (polylineData && polylineData.result) {
         // Only redraw if data has changed, routes have changed, or polylines haven't been drawn yet
         if (hasPolylineDataChanged || hasSelectedRoutesChanged || !polylinesDrawnRef.current) {
-          console.log('Polyline data or routes changed, drawing from GeoJSON structure');
+          lastPolylineUpdateRef.current = now;
+          console.log('Polyline data or routes changed, drawing from provided GeoJSON structure (no API calls)');
           currentPolylineDataRef.current = polylineData;
           currentSelectedRoutesRef.current = [...selectedRoutesForMap];
           await drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
@@ -751,9 +834,10 @@ const MapComponent: React.FC<MapComponentProps> = ({
           console.log('Polyline data and routes unchanged, preserving existing polylines');
         }
       } else if (selectedRoutesForMap && selectedRoutesForMap.length > 0) {
-        // Only redraw if routes have changed or polylines haven't been drawn yet
+        // Only use fallback API method if no polylineData is provided
         if (hasSelectedRoutesChanged || !polylinesDrawnRef.current) {
-          console.log('Routes changed, falling back to legacy API');
+          lastPolylineUpdateRef.current = now;
+          console.log('No polylineData provided, falling back to API calls (this should be avoided)');
           currentSelectedRoutesRef.current = [...selectedRoutesForMap];
           await drawRoutePaths(selectedRoutesForMap);
           polylinesDrawnRef.current = true;
@@ -762,17 +846,29 @@ const MapComponent: React.FC<MapComponentProps> = ({
         }
       } else if (selectedRoutesForMap.length === 0 && polylinesDrawnRef.current) {
         // Only clear if we have no routes selected and polylines were previously drawn
+        lastPolylineUpdateRef.current = now;
         console.log('No routes selected, clearing polylines and resetting state');
         clearRouteElements(true, true);
         polylinesDrawnRef.current = false;
         currentPolylineDataRef.current = null;
         currentSelectedRoutesRef.current = [];
-        // Clear cache when no routes are selected to free memory
-        routeStopsCacheRef.current.clear();
       }
     };
 
-    updatePolylines();
+    // Debounce polyline updates to prevent rapid successive calls
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+    
+    debounceTimeoutRef.current = setTimeout(() => {
+      updatePolylines();
+    }, 300); // 300ms debounce delay
+
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
   }, [polylineData, selectedRoutesForMap, drawPolylinesFromGeoJSON, drawRoutePaths, clearRouteElements]);
 
   return (
@@ -782,6 +878,17 @@ const MapComponent: React.FC<MapComponentProps> = ({
         className="h-full w-full"
         style={{ height: '100%' }}
       />
+      
+      {/* Status indicator */}
+      <StatusIndicator status={connectionStatus} />
+      
+      {/* Error notification */}
+      {connectionError && (
+        <ErrorNotification 
+          error={connectionError} 
+          onDismiss={() => setConnectionError(null)} 
+        />
+      )}
     </div>
   );
 };
