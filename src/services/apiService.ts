@@ -1,11 +1,29 @@
 const BASE_URL = 'https://tracker_baym.hbssweb.com';
 
-// Base64 decode helper
+// Base64 decode helper with improved error handling
 const decodeBase64 = (encodedData: string) => {
   try {
-    return JSON.parse(atob(encodedData));
+    // Check if the data looks like base64
+    if (!encodedData || encodedData.trim().length === 0) {
+      console.warn('Empty encoded data provided');
+      return null;
+    }
+    
+    // Remove any whitespace and check if it's valid base64 format
+    const cleanedData = encodedData.trim();
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(cleanedData)) {
+      console.warn('Data does not appear to be valid base64:', cleanedData.substring(0, 100));
+      return null;
+    }
+    
+    const decodedString = atob(cleanedData);
+    const parsedData = JSON.parse(decodedString);
+    
+    console.log('Successfully decoded base64 data');
+    return parsedData;
   } catch (error) {
     console.error('Failed to decode base64 data:', error);
+    console.error('Input data (first 100 chars):', encodedData?.substring(0, 100));
     return null;
   }
 };
@@ -129,10 +147,50 @@ export const apiService = {
   async getAvlData() {
     try {
       const response = await fetchWithCORS(`${BASE_URL}/GetAvlData?data=ALL`);
-      const encodedData = await response.text();
-      const decodedData = decodeBase64(encodedData);
-      console.log('AVL Data decoded:', decodedData);
-      return decodedData;
+      
+      // Check response status first
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      console.log('AVL Data response content-type:', contentType);
+      
+      // Handle different response types
+      let data;
+      if (contentType && contentType.includes('application/json')) {
+        // Direct JSON response
+        data = await response.json();
+        console.log('AVL Data direct JSON:', data);
+        return data;
+      } else {
+        // Try as base64 encoded text
+        const encodedData = await response.text();
+        console.log('AVL Data raw response (first 200 chars):', encodedData.substring(0, 200));
+        
+        // Check if it's actually base64 encoded
+        if (encodedData && !encodedData.startsWith('<') && !encodedData.startsWith('{')) {
+          const decodedData = decodeBase64(encodedData);
+          if (decodedData) {
+            console.log('AVL Data decoded successfully:', decodedData);
+            return decodedData;
+          }
+        } else {
+          // Try parsing as direct JSON
+          try {
+            data = JSON.parse(encodedData);
+            console.log('AVL Data parsed as JSON:', data);
+            return data;
+          } catch (parseError) {
+            console.warn('Failed to parse response as JSON:', parseError);
+          }
+        }
+      }
+      
+      // If we get here, something went wrong
+      console.warn('Unable to process AVL data response, using mock data');
+      throw new Error('Invalid response format');
+      
     } catch (error) {
       console.error('Failed to fetch AVL data, using mock data:', error);
       // Return mock AVL data for development

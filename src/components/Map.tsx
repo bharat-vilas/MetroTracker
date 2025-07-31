@@ -38,6 +38,8 @@ const MapComponent: React.FC<MapProps> = ({
   const vehicleMarkersRef = useRef(new Map<string, L.Marker>());
   const [vehicles, setVehicles] = useState<VehicleAvlData[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const polylinesDrawnRef = useRef<boolean>(false); // Track if polylines are already drawn
+  const currentPolylineDataRef = useRef<PolylineResponse | null>(null); // Track current polyline data
 
   // Route colors for different routes (fallback)
   const routeColors = [
@@ -103,6 +105,8 @@ const MapComponent: React.FC<MapProps> = ({
         }
       });
       routeLinesRef.current = [];
+      polylinesDrawnRef.current = false;
+      currentPolylineDataRef.current = null;
     }
 
     // Clear stop markers only if requested
@@ -114,6 +118,13 @@ const MapComponent: React.FC<MapProps> = ({
       });
       markersRef.current = [];
     }
+  }, []);
+
+  // Function to preserve polylines when only updating vehicle data
+  const preservePolylines = useCallback(() => {
+    console.log('Preserving polylines during vehicle update');
+    // This function intentionally does nothing to preserve existing polylines
+    return;
   }, []);
 
   // Clear all map elements (for complete cleanup)
@@ -505,9 +516,10 @@ const MapComponent: React.FC<MapProps> = ({
     }
   }, [clearRouteElements, createStopMarker, routeColors, drawPolylinesFromGeoJSON]);
 
-  // Fetch all vehicles
+  // Fetch all vehicles - independent of polyline management
   const fetchAllVehicles = useCallback(async () => {
     try {
+      console.log('Fetching vehicle data (preserving polylines)');
       const avlData = await apiService.getAvlData();
       
       if (avlData?.result) {
@@ -524,29 +536,36 @@ const MapComponent: React.FC<MapProps> = ({
           }
         });
         
+        // Update vehicles without affecting polylines
         setVehicles(allVehicles);
         updateVehicleMarkers(allVehicles);
+        console.log(`Updated ${allVehicles.length} vehicle markers, polylines preserved`);
+      } else {
+        console.warn('No AVL data received');
       }
     } catch (error) {
       console.error('Failed to fetch vehicles:', error);
     }
   }, [updateVehicleMarkers]);
 
-  // Start vehicle tracking
+  // Start vehicle tracking - optimized to prevent map reloading
   const startVehicleTracking = useCallback(() => {
-    console.log('Starting vehicle tracking');
+    console.log('Starting vehicle tracking (polylines will remain intact)');
+    
+    // Clear any existing interval to prevent multiple intervals
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     
     // Initial fetch
     fetchAllVehicles();
     
     // Set up interval for regular updates
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    
     intervalRef.current = setInterval(() => {
+      console.log('Interval update: fetching vehicles only');
       fetchAllVehicles();
-    }, 3000); // Update every 3 seconds for more responsive tracking
+    }, 5000); // Update every 5 seconds to reduce load and prevent excessive rerendering
   }, [fetchAllVehicles]);
 
   // Stop vehicle tracking
@@ -585,29 +604,56 @@ const MapComponent: React.FC<MapProps> = ({
 
     // Cleanup function
     return () => {
-      console.log('Cleaning up map');
+      console.log('Cleaning up map and preventing memory leaks');
       stopVehicleTracking();
       clearMapElements();
       clearVehicleMarkers();
+      
+      // Ensure interval is cleared
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
       
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
+      
+      // Reset polyline tracking flags
+      polylinesDrawnRef.current = false;
+      currentPolylineDataRef.current = null;
     };
   }, [startVehicleTracking, stopVehicleTracking, clearMapElements, clearVehicleMarkers]);
 
-  // Handle polyline data changes (new primary method)
+  // Handle polyline data changes (new primary method) - with independence from vehicle updates
   useEffect(() => {
     const updatePolylines = async () => {
+      // Check if polyline data has actually changed
+      const hasPolylineDataChanged = JSON.stringify(currentPolylineDataRef.current) !== JSON.stringify(polylineData);
+      
       if (polylineData && polylineData.result) {
-        console.log('Polyline data provided, drawing from GeoJSON structure');
-        await drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
+        // Only redraw if data has changed or polylines haven't been drawn yet
+        if (hasPolylineDataChanged || !polylinesDrawnRef.current) {
+          console.log('Polyline data provided and changed, drawing from GeoJSON structure');
+          currentPolylineDataRef.current = polylineData;
+          await drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
+          polylinesDrawnRef.current = true;
+        } else {
+          console.log('Polyline data unchanged, preserving existing polylines');
+        }
       } else if (selectedRoutesForMap && selectedRoutesForMap.length > 0) {
-        console.log('No polyline data provided, falling back to legacy API');
-        await drawRoutePaths(selectedRoutesForMap);
-      } else {
-        // Only clear route elements, keep vehicles
+        // Only redraw if routes have changed or polylines haven't been drawn yet
+        if (!polylinesDrawnRef.current) {
+          console.log('No polyline data provided, falling back to legacy API');
+          await drawRoutePaths(selectedRoutesForMap);
+          polylinesDrawnRef.current = true;
+        } else {
+          console.log('Routes unchanged, preserving existing polylines');
+        }
+      } else if (selectedRoutesForMap.length === 0 && polylinesDrawnRef.current) {
+        // Only clear if we have no routes selected and polylines were previously drawn
+        console.log('No routes selected, clearing polylines');
         clearRouteElements(true, true);
       }
     };
