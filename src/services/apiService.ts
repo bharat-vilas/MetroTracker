@@ -40,9 +40,8 @@ const fetchWithCORS = async (url: string) => {
     });
     return response;
   } catch (error) {
-    console.warn('CORS error, using mock data:', error);
-    // Return mock response for development
-    throw new Error('CORS_ERROR');
+    console.error('CORS error:', error);
+    throw error;
   }
 };
 
@@ -70,17 +69,7 @@ export const apiService = {
       return null;
     } catch (error) {
       console.error('Failed to fetch routes:', error);
-      // Return mock routes for development
-      return {
-        status: 'OK',
-        routes: [
-          { id: 'ROUTE_01', name: 'ROUTE 01 Weekday', segment_id: 'S90101', status: 'active', startTime: '06:00', endTime: '22:00' },
-          { id: 'ROUTE_02', name: 'ROUTE 02 Express', segment_id: 'S90201', status: 'active', startTime: '07:00', endTime: '21:00' },
-          { id: 'ROUTE_03', name: 'ROUTE 03 Local', segment_id: 'S90301', status: 'active', startTime: '08:00', endTime: '20:00' },
-          { id: 'ROUTE_04', name: 'ROUTE 04 Weekend', segment_id: 'S90401', status: 'active', startTime: '09:00', endTime: '19:00' },
-          { id: 'ROUTE_05', name: 'ROUTE 05 Night', segment_id: 'S90501', status: 'active', startTime: '22:00', endTime: '05:00' },
-        ]
-      };
+      return null;
     }
   },
 
@@ -110,15 +99,7 @@ export const apiService = {
       };
     } catch (error) {
       console.error('Failed to fetch stops for route:', error);
-      // Return mock stops for development
-      return {
-        status: 'OK',
-        stops: [
-          { id: '1', name: 'Main Terminal', latitude: 42.3601, longitude: -71.0589, eta: '5 min', sequence: 1 },
-          { id: '2', name: 'Downtown Plaza', latitude: 42.3651, longitude: -71.0639, eta: '12 min', sequence: 2 },
-          { id: '3', name: 'University Ave', latitude: 42.3701, longitude: -71.0689, eta: '18 min', sequence: 3 }
-        ]
-      };
+      return null;
     }
   },
 
@@ -188,60 +169,12 @@ export const apiService = {
       }
       
       // If we get here, something went wrong
-      console.warn('Unable to process AVL data response, using mock data');
+      console.warn('Unable to process AVL data response');
       throw new Error('Invalid response format');
       
     } catch (error) {
-      console.error('Failed to fetch AVL data, using mock data:', error);
-      // Return mock AVL data for development matching the actual API structure
-      return {
-        cmd_name: "GetAvlData",
-        status: "OK",
-        result: [
-          {
-            idx: 0,
-            vehicle_id: "V247",
-            driver_id: "TVAN", 
-            segment_id: "ROUTE 01 Weekday",
-            avl_data: [{
-              id: 0,
-              adid: -1,
-              vehicle_id: "V247",
-              driver_id: "TVAN",
-              segment_id: "ROUTE 01 Weekday",
-              record_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-').toUpperCase(),
-              record_time: new Date().toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' }) + 'A',
-              lat: 42.3601,
-              lng: -71.0589,
-              speed: 25,
-              angle: 180,
-              direction: 180,
-              device_time: new Date().toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' }) + 'A'
-            }]
-          },
-          {
-            idx: 1,
-            vehicle_id: "V241",
-            driver_id: "SSCO",
-            segment_id: "ROUTE 01 Weekday", 
-            avl_data: [{
-              id: 1,
-              adid: -1,
-              vehicle_id: "V241",
-              driver_id: "SSCO",
-              segment_id: "ROUTE 01 Weekday",
-              record_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-').toUpperCase(),
-              record_time: new Date().toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' }) + 'A',
-              lat: 43.60191,
-              lng: -83.88615,
-              speed: 0,
-              angle: 141,
-              direction: 141,
-              device_time: new Date().toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' }) + 'A'
-            }]
-          }
-        ]
-      };
+      console.error('Failed to fetch AVL data:', error);
+      return null;
     }
   },
 

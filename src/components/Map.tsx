@@ -318,44 +318,46 @@ const MapComponent: React.FC<MapComponentProps> = ({
     }
 
     // Check cache first and only fetch missing routes
-    const routesNeedingFetch = [];
-    for (const route of routesToFetchStops) {
-      const cacheKey = route.segment_id || route.id;
-      if (routeStopsCacheRef.current.has(cacheKey)) {
-        // Use cached data
-        routeStopsMap.set(cacheKey, routeStopsCacheRef.current.get(cacheKey)!);
-        console.log(`Using cached stops for route: ${route.name}`);
-      } else {
-        // Need to fetch
-        routesNeedingFetch.push(route);
-      }
-    }
-
-    // Only fetch stops for routes not in cache
-    if (routesNeedingFetch.length > 0) {
-      console.log(`Fetching stops for ${routesNeedingFetch.length} routes not in cache`);
-      try {
-        const stopPromises = routesNeedingFetch.map(async (route) => {
-          try {
-            const stopsData = await apiService.getStopsForRoute(route.name);
-            if (stopsData?.stops) {
-              const cacheKey = route.segment_id || route.id;
-              // Cache the data
-              routeStopsCacheRef.current.set(cacheKey, stopsData.stops);
-              // Add to current map
-              routeStopsMap.set(cacheKey, stopsData.stops);
-              console.log(`Cached stops for route: ${route.name}`);
-            }
-          } catch (error) {
-            console.warn(`Failed to fetch stops for route ${route.name}:`, error);
+            const routesNeedingFetch = [];
+        for (const route of routesToFetchStops) {
+          const cacheKey = route.segment_id || route.id;
+          if (routeStopsCacheRef.current.has(cacheKey)) {
+            // Use cached data
+            routeStopsMap.set(cacheKey, routeStopsCacheRef.current.get(cacheKey)!);
+            console.log(`Using cached stops for route: ${route.name}`);
+          } else {
+            // Need to fetch
+            routesNeedingFetch.push(route);
           }
-        });
-        
-        await Promise.all(stopPromises);
-      } catch (error) {
-        console.warn('Error fetching route stops:', error);
-      }
-    }
+        }
+
+        // Only fetch stops for routes not in cache
+        if (routesNeedingFetch.length > 0) {
+          console.log(`Fetching stops for ${routesNeedingFetch.length} routes not in cache`);
+          try {
+            const stopPromises = routesNeedingFetch.map(async (route) => {
+              try {
+                const stopsData = await apiService.getStopsForRoute(route.name);
+                if (stopsData?.stops && Array.isArray(stopsData.stops) && stopsData.stops.length > 0) {
+                  const cacheKey = route.segment_id || route.id;
+                  // Cache the data
+                  routeStopsCacheRef.current.set(cacheKey, stopsData.stops);
+                  // Add to current map
+                  routeStopsMap.set(cacheKey, stopsData.stops);
+                  console.log(`Cached stops for route: ${route.name}`);
+                } else {
+                  console.log(`No stops data available for route: ${route.name}`);
+                }
+              } catch (error) {
+                console.warn(`Failed to fetch stops for route ${route.name}:`, error);
+              }
+            });
+            
+            await Promise.all(stopPromises);
+          } catch (error) {
+            console.warn('Error fetching route stops:', error);
+          }
+        }
 
     processedPolylines.forEach((polylineInfo, index) => {
       // If filtering by routes, check if this polyline matches any selected route
@@ -584,7 +586,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
       console.log('Fetching vehicle data (preserving polylines)');
       const avlData = await apiService.getAvlData();
       
-      if (avlData?.result) {
+      if (avlData?.result && Array.isArray(avlData.result) && avlData.result.length > 0) {
         const allVehicles: Vehicle[] = [];
         
         avlData.result.forEach((vehicleGroup: any) => {
@@ -624,10 +626,26 @@ const MapComponent: React.FC<MapComponentProps> = ({
         updateVehicleMarkers(allVehicles);
         console.log(`Updated ${allVehicles.length} vehicle markers, polylines preserved`);
       } else {
-        console.warn('No AVL data received');
+        console.log('No vehicle data available from API');
+        setVehicles([]);
+        // Clear existing vehicle markers when no data is available
+        vehicleMarkersRef.current.forEach((marker) => {
+          if (mapRef.current) {
+            mapRef.current.removeLayer(marker);
+          }
+        });
+        vehicleMarkersRef.current.clear();
       }
     } catch (error) {
       console.error('Failed to fetch vehicles:', error);
+      setVehicles([]);
+      // Clear existing vehicle markers on error
+      vehicleMarkersRef.current.forEach((marker) => {
+        if (mapRef.current) {
+          mapRef.current.removeLayer(marker);
+        }
+      });
+      vehicleMarkersRef.current.clear();
     }
   }, [updateVehicleMarkers]);
 
