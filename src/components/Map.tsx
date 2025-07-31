@@ -2,7 +2,13 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { ApiRoute, VehicleAvlData, RouteStop, apiService } from '@/services/apiService';
-import { processPolylineData } from '@/lib/polylineUtils';
+import { 
+  processPolylineData, 
+  processGeoJSONPolyline, 
+  processMultiplePolylines,
+  PolylineResponse,
+  PolylineData 
+} from '@/lib/polylineUtils';
 
 // Fix for default markers in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -16,9 +22,15 @@ interface MapProps {
   selectedRoute: ApiRoute | null;
   onVehicleSelect: (vehicleId: string) => void;
   selectedRoutesForMap?: ApiRoute[];
+  polylineData?: PolylineResponse; // New prop for polyline data
 }
 
-const MapComponent: React.FC<MapProps> = ({ selectedRoute, onVehicleSelect, selectedRoutesForMap = [] }) => {
+const MapComponent: React.FC<MapProps> = ({ 
+  selectedRoute, 
+  onVehicleSelect, 
+  selectedRoutesForMap = [],
+  polylineData 
+}) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<L.Marker[]>([]);
@@ -27,7 +39,7 @@ const MapComponent: React.FC<MapProps> = ({ selectedRoute, onVehicleSelect, sele
   const [vehicles, setVehicles] = useState<VehicleAvlData[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Route colors for different routes
+  // Route colors for different routes (fallback)
   const routeColors = [
     '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
     '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6366f1'
@@ -35,7 +47,8 @@ const MapComponent: React.FC<MapProps> = ({ selectedRoute, onVehicleSelect, sele
 
   console.log('Map component rendering', { 
     selectedRoute: selectedRoute?.name, 
-    selectedRoutesForMap: selectedRoutesForMap?.map(r => r.name) 
+    selectedRoutesForMap: selectedRoutesForMap?.map(r => r.name),
+    polylineData: polylineData?.result?.length 
   });
 
   // Custom vehicle icon creator
@@ -179,7 +192,86 @@ const MapComponent: React.FC<MapProps> = ({ selectedRoute, onVehicleSelect, sele
     });
   }, []);
 
-  // Draw route paths on map using polyline API
+  // Draw polylines from GeoJSON-like data structure
+  const drawPolylinesFromGeoJSON = useCallback((polylineResponse: PolylineResponse, filterRoutes?: ApiRoute[]) => {
+    if (!mapRef.current || !polylineResponse?.result) {
+      console.warn('Map not ready or no polyline data');
+      return;
+    }
+
+    console.log('Drawing polylines from GeoJSON data:', polylineResponse.result.length);
+
+    clearMapElements();
+
+    const processedPolylines = processMultiplePolylines(polylineResponse);
+    const allBounds: L.LatLngBounds[] = [];
+
+    processedPolylines.forEach((polylineInfo, index) => {
+      // If filtering by routes, check if this polyline matches any selected route
+      if (filterRoutes && filterRoutes.length > 0) {
+        const matchingRoute = filterRoutes.find(route => 
+          route.segment_id === polylineInfo.segmentId || 
+          route.id === polylineInfo.segmentId ||
+          route.name === polylineInfo.name
+        );
+        
+        if (!matchingRoute) {
+          console.log(`Skipping polyline ${polylineInfo.name} - not in selected routes`);
+          return;
+        }
+      }
+
+      if (polylineInfo.coordinates.length > 0) {
+        console.log(`Drawing polyline for ${polylineInfo.name} with ${polylineInfo.coordinates.length} points`);
+        
+        // Create polyline with style from data
+        const routeLine = L.polyline(
+          polylineInfo.coordinates,
+          {
+            color: polylineInfo.style.color,
+            weight: polylineInfo.style.weight,
+            opacity: polylineInfo.style.opacity
+          }
+        ).bindPopup(`
+          <div class="p-2">
+            <h3 class="font-bold text-sm">${polylineInfo.name}</h3>
+            <p class="text-xs text-gray-600">Segment ID: ${polylineInfo.segmentId}</p>
+            <p class="text-xs text-gray-600">${polylineInfo.coordinates.length} points</p>
+            <div class="flex items-center mt-1">
+              <div style="
+                width: 12px; 
+                height: 12px; 
+                background-color: ${polylineInfo.style.color}; 
+                border-radius: 2px; 
+                margin-right: 4px;
+              "></div>
+              <span class="text-xs">Color: ${polylineInfo.style.color}</span>
+            </div>
+          </div>
+        `).addTo(mapRef.current);
+
+        routeLinesRef.current.push(routeLine);
+        allBounds.push(routeLine.getBounds());
+      } else {
+        console.warn(`No valid coordinates for polyline: ${polylineInfo.name}`);
+      }
+    });
+
+    // Fit map to show all polylines
+    if (allBounds.length > 0) {
+      const group = new L.FeatureGroup();
+      allBounds.forEach(bounds => {
+        group.addLayer(L.rectangle(bounds, { stroke: false, fill: false }));
+      });
+      
+      mapRef.current.fitBounds(group.getBounds(), {
+        padding: [20, 20],
+        maxZoom: 15
+      });
+    }
+  }, [clearMapElements]);
+
+  // Legacy method - Draw route paths on map using polyline API (kept for backward compatibility)
   const drawRoutePaths = useCallback(async (routes: ApiRoute[]) => {
     if (!mapRef.current || !routes.length) return;
 
@@ -375,16 +467,18 @@ const MapComponent: React.FC<MapProps> = ({ selectedRoute, onVehicleSelect, sele
     };
   }, [startVehicleTracking, stopVehicleTracking, clearMapElements, clearVehicleMarkers]);
 
-  // Handle selected routes changes
+  // Handle polyline data changes (new primary method)
   useEffect(() => {
-    console.log('Selected routes changed:', selectedRoutesForMap);
-    
-    if (selectedRoutesForMap && selectedRoutesForMap.length > 0) {
+    if (polylineData && polylineData.result) {
+      console.log('Polyline data provided, drawing from GeoJSON structure');
+      drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
+    } else if (selectedRoutesForMap && selectedRoutesForMap.length > 0) {
+      console.log('No polyline data provided, falling back to legacy API');
       drawRoutePaths(selectedRoutesForMap);
     } else {
       clearMapElements();
     }
-  }, [selectedRoutesForMap, drawRoutePaths, clearMapElements]);
+  }, [polylineData, selectedRoutesForMap, drawPolylinesFromGeoJSON, drawRoutePaths, clearMapElements]);
 
   return (
     <div className="relative flex-1 h-full">

@@ -6,6 +6,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index.tsx";
 import EmbedTracker from "./pages/EmbedTracker.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import PolylineDemo from "./components/PolylineDemo.tsx";
+import PolylineUsageExample from "./components/PolylineUsageExample.tsx";
 
 const queryClient = new QueryClient();
 
@@ -18,6 +20,8 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/embed" element={<EmbedTracker />} />
+          <Route path="/polyline-demo" element={<PolylineDemo />} />
+          <Route path="/polyline-usage" element={<PolylineUsageExample />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
