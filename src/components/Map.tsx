@@ -1,14 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { ApiRoute, VehicleAvlData, RouteStop, apiService } from '@/services/apiService';
-import { 
-  processPolylineData, 
-  processGeoJSONPolyline, 
-  processMultiplePolylines,
-  PolylineResponse,
-  PolylineData 
-} from '@/lib/polylineUtils';
+import { apiService, ApiRoute, Vehicle, RouteStop } from '@/services/apiService';
+import { PolylineResponse, processMultiplePolylines } from '@/lib/polylineUtils';
 
 // Fix for default markers in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -18,34 +12,39 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-interface MapProps {
-  selectedRoute: ApiRoute | null;
-  onVehicleSelect: (vehicleId: string) => void;
+interface MapComponentProps {
+  selectedRoute?: ApiRoute | null;
+  onVehicleSelect?: (vehicleId: string) => void;
   selectedRoutesForMap?: ApiRoute[];
-  polylineData?: PolylineResponse; // New prop for polyline data
+  polylineData?: PolylineResponse;
 }
 
-const MapComponent: React.FC<MapProps> = ({ 
-  selectedRoute, 
-  onVehicleSelect, 
+const MapComponent: React.FC<MapComponentProps> = ({
+  selectedRoute,
+  onVehicleSelect,
   selectedRoutesForMap = [],
-  polylineData 
+  polylineData
 }) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const markersRef = useRef<L.Marker[]>([]);
   const routeLinesRef = useRef<L.Polyline[]>([]);
-  const vehicleMarkersRef = useRef(new Map<string, L.Marker>());
-  const [vehicles, setVehicles] = useState<VehicleAvlData[]>([]);
+  const stopMarkersRef = useRef<L.Marker[]>([]);
+  const vehicleMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const polylinesDrawnRef = useRef<boolean>(false); // Track if polylines are already drawn
-  const currentPolylineDataRef = useRef<PolylineResponse | null>(null); // Track current polyline data
 
-  // Route colors for different routes (fallback)
-  const routeColors = [
-    '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-    '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6366f1'
-  ];
+  // Route colors for visual distinction
+  const routeColors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#f97316', '#06b6d4', '#84cc16'];
+
+  // Add tracking refs for polyline state
+  const polylinesDrawnRef = useRef<boolean>(false);
+  const currentPolylineDataRef = useRef<PolylineResponse | null>(null); // Track current polyline data
+  const currentSelectedRoutesRef = useRef<ApiRoute[]>([]); // Track current selected routes
+  
+  // Add cache for route stops data to prevent repeated API calls
+  const routeStopsCacheRef = useRef<Map<string, RouteStop[]>>(new Map());
+  const lastFetchedRoutesRef = useRef<Set<string>>(new Set());
+
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
   console.log('Map component rendering', { 
     selectedRoute: selectedRoute?.name, 
@@ -60,36 +59,75 @@ const MapComponent: React.FC<MapProps> = ({
     
     return L.divIcon({
       html: `<div style="
-        width: 20px; 
-        height: 20px; 
+        width: 24px; 
+        height: 16px; 
         background: linear-gradient(45deg, ${color}, #ff8c42); 
-        border: 3px solid white; 
-        border-radius: 50%; 
+        border: 2px solid white; 
+        border-radius: 6px; 
         box-shadow: 0 3px 6px rgba(0,0,0,0.4);
         position: relative;
         ${isMoving ? 'animation: vehiclePulse 1.5s infinite;' : ''}
       ">
+        <!-- Car body shape -->
         <div style="
           position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          color: white;
-          font-size: 8px;
-          font-weight: bold;
-          text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
-        ">🚌</div>
+          top: 2px;
+          left: 2px;
+          right: 2px;
+          bottom: 2px;
+          background: ${color};
+          border-radius: 4px;
+        "></div>
+        <!-- Front windshield -->
+        <div style="
+          position: absolute;
+          top: 3px;
+          right: 3px;
+          width: 4px;
+          height: 8px;
+          background: rgba(255,255,255,0.7);
+          border-radius: 0 2px 2px 0;
+        "></div>
+        <!-- Rear windshield -->
+        <div style="
+          position: absolute;
+          top: 3px;
+          left: 3px;
+          width: 4px;
+          height: 8px;
+          background: rgba(255,255,255,0.7);
+          border-radius: 2px 0 0 2px;
+        "></div>
+        <!-- Car wheels -->
+        <div style="
+          position: absolute;
+          bottom: -2px;
+          left: 2px;
+          width: 4px;
+          height: 4px;
+          background: #333;
+          border-radius: 50%;
+        "></div>
+        <div style="
+          position: absolute;
+          bottom: -2px;
+          right: 2px;
+          width: 4px;
+          height: 4px;
+          background: #333;
+          border-radius: 50%;
+        "></div>
       </div>
       <style>
         @keyframes vehiclePulse {
           0% { transform: scale(1); box-shadow: 0 3px 6px rgba(0,0,0,0.4); }
-          50% { transform: scale(1.15); box-shadow: 0 4px 8px rgba(255,107,53,0.6); }
+          50% { transform: scale(1.1); box-shadow: 0 4px 8px rgba(255,107,53,0.6); }
           100% { transform: scale(1); box-shadow: 0 3px 6px rgba(0,0,0,0.4); }
         }
       </style>`,
       className: `vehicle-marker vehicle-${vehicleId}`,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12]
+      iconSize: [24, 16],
+      iconAnchor: [12, 8]
     });
   };
 
@@ -111,12 +149,12 @@ const MapComponent: React.FC<MapProps> = ({
 
     // Clear stop markers only if requested
     if (clearStops) {
-      markersRef.current.forEach(marker => {
+      stopMarkersRef.current.forEach(marker => {
         if (mapRef.current) {
           mapRef.current.removeLayer(marker);
         }
       });
-      markersRef.current = [];
+      stopMarkersRef.current = [];
     }
   }, []);
 
@@ -144,7 +182,7 @@ const MapComponent: React.FC<MapProps> = ({
   }, []);
 
   // Update vehicle markers with smooth transitions
-  const updateVehicleMarkers = useCallback((vehicles: VehicleAvlData[]) => {
+  const updateVehicleMarkers = useCallback((vehicles: Vehicle[]) => {
     if (!mapRef.current) return;
 
     vehicles.forEach(vehicle => {
@@ -196,7 +234,7 @@ const MapComponent: React.FC<MapProps> = ({
         .addTo(mapRef.current);
 
         marker.on('click', () => {
-          onVehicleSelect(vehicle.vehicle_id);
+          onVehicleSelect?.(vehicle.vehicle_id);
         });
 
         vehicleMarkersRef.current.set(vehicle.vehicle_id, marker);
@@ -211,7 +249,7 @@ const MapComponent: React.FC<MapProps> = ({
         vehicleMarkersRef.current.delete(vehicleId);
       }
     });
-  }, [onVehicleSelect]);
+  }, [onVehicleSelect, createVehicleIcon]);
 
   // Create stop marker with color
   const createStopMarker = useCallback((color: string, stopIndex?: number) => {
@@ -258,10 +296,10 @@ const MapComponent: React.FC<MapProps> = ({
     const processedPolylines = processMultiplePolylines(polylineResponse);
     const allBounds: L.LatLngBounds[] = [];
 
-    // Fetch all stops for the routes we're about to draw
+    // Optimize stops fetching with caching
     const routeStopsMap = new Map<string, RouteStop[]>();
 
-    // First, fetch stops for all routes that we're going to display
+    // First, determine which routes we need to fetch stops for
     const routesToFetchStops = [];
     if (filterRoutes && filterRoutes.length > 0) {
       routesToFetchStops.push(...filterRoutes);
@@ -279,24 +317,47 @@ const MapComponent: React.FC<MapProps> = ({
       });
     }
 
-    // Fetch stops for all routes in parallel
-    try {
-      const stopPromises = routesToFetchStops.map(async (route) => {
-        try {
-          const stopsData = await apiService.getStopsForRoute(route.name);
-          if (stopsData?.stops) {
-            routeStopsMap.set(route.segment_id || route.id, stopsData.stops);
+    // Check cache first and only fetch missing routes
+            const routesNeedingFetch = [];
+        for (const route of routesToFetchStops) {
+          const cacheKey = route.segment_id || route.id;
+          if (routeStopsCacheRef.current.has(cacheKey)) {
+            // Use cached data
+            routeStopsMap.set(cacheKey, routeStopsCacheRef.current.get(cacheKey)!);
+            console.log(`Using cached stops for route: ${route.name}`);
+          } else {
+            // Need to fetch
+            routesNeedingFetch.push(route);
           }
-        } catch (error) {
-          console.warn(`Failed to fetch stops for route ${route.name}:`, error);
         }
-      });
-      
-      await Promise.all(stopPromises);
-      console.log('Fetched stops for routes:', Array.from(routeStopsMap.keys()));
-    } catch (error) {
-      console.warn('Error fetching route stops:', error);
-    }
+
+        // Only fetch stops for routes not in cache
+        if (routesNeedingFetch.length > 0) {
+          console.log(`Fetching stops for ${routesNeedingFetch.length} routes not in cache`);
+          try {
+            const stopPromises = routesNeedingFetch.map(async (route) => {
+              try {
+                const stopsData = await apiService.getStopsForRoute(route.name);
+                if (stopsData?.stops && Array.isArray(stopsData.stops) && stopsData.stops.length > 0) {
+                  const cacheKey = route.segment_id || route.id;
+                  // Cache the data
+                  routeStopsCacheRef.current.set(cacheKey, stopsData.stops);
+                  // Add to current map
+                  routeStopsMap.set(cacheKey, stopsData.stops);
+                  console.log(`Cached stops for route: ${route.name}`);
+                } else {
+                  console.log(`No stops data available for route: ${route.name}`);
+                }
+              } catch (error) {
+                console.warn(`Failed to fetch stops for route ${route.name}:`, error);
+              }
+            });
+            
+            await Promise.all(stopPromises);
+          } catch (error) {
+            console.warn('Error fetching route stops:', error);
+          }
+        }
 
     processedPolylines.forEach((polylineInfo, index) => {
       // If filtering by routes, check if this polyline matches any selected route
@@ -375,7 +436,7 @@ const MapComponent: React.FC<MapProps> = ({
               `)
               .addTo(mapRef.current);
 
-            markersRef.current.push(marker);
+            stopMarkersRef.current.push(marker);
           });
         }
       } else {
@@ -449,10 +510,10 @@ const MapComponent: React.FC<MapProps> = ({
 
           // Process coordinates - handle both encoded polylines and coordinate arrays
           if (routePolylineData.coordinates && routePolylineData.coordinates.length > 0) {
-            coordinates = processPolylineData(routePolylineData.coordinates);
+            coordinates = processMultiplePolylines(routePolylineData).flatMap(p => p.coordinates);
           } else if (routePolylineData.polyline) {
             // Try to decode polyline string
-            coordinates = processPolylineData(routePolylineData.polyline);
+            coordinates = processMultiplePolylines(routePolylineData).flatMap(p => p.coordinates);
           }
 
           // Draw polyline if we have valid coordinates
@@ -494,7 +555,7 @@ const MapComponent: React.FC<MapProps> = ({
                 `)
                 .addTo(mapRef.current);
 
-              markersRef.current.push(marker);
+              stopMarkersRef.current.push(marker);
             });
           }
         } else {
@@ -525,14 +586,14 @@ const MapComponent: React.FC<MapProps> = ({
       console.log('Fetching vehicle data (preserving polylines)');
       const avlData = await apiService.getAvlData();
       
-      if (avlData?.result) {
-        const allVehicles: VehicleAvlData[] = [];
+      if (avlData?.result && Array.isArray(avlData.result) && avlData.result.length > 0) {
+        const allVehicles: Vehicle[] = [];
         
         avlData.result.forEach((vehicleGroup: any) => {
           if (vehicleGroup.avl_data && Array.isArray(vehicleGroup.avl_data)) {
             vehicleGroup.avl_data.forEach((vehicle: any) => {
               // Handle the actual API structure
-              const processedVehicle: VehicleAvlData = {
+              const processedVehicle: Vehicle = {
                 id: vehicle.id || 0,
                 adid: vehicle.adid,
                 vehicle_id: vehicleGroup.vehicle_id || vehicle.vehicle_id,
@@ -565,10 +626,26 @@ const MapComponent: React.FC<MapProps> = ({
         updateVehicleMarkers(allVehicles);
         console.log(`Updated ${allVehicles.length} vehicle markers, polylines preserved`);
       } else {
-        console.warn('No AVL data received');
+        console.log('No vehicle data available from API');
+        setVehicles([]);
+        // Clear existing vehicle markers when no data is available
+        vehicleMarkersRef.current.forEach((marker) => {
+          if (mapRef.current) {
+            mapRef.current.removeLayer(marker);
+          }
+        });
+        vehicleMarkersRef.current.clear();
       }
     } catch (error) {
       console.error('Failed to fetch vehicles:', error);
+      setVehicles([]);
+      // Clear existing vehicle markers on error
+      vehicleMarkersRef.current.forEach((marker) => {
+        if (mapRef.current) {
+          mapRef.current.removeLayer(marker);
+        }
+      });
+      vehicleMarkersRef.current.clear();
     }
   }, [updateVehicleMarkers]);
 
@@ -644,9 +721,12 @@ const MapComponent: React.FC<MapProps> = ({
         mapRef.current = null;
       }
       
-      // Reset polyline tracking flags
+      // Reset polyline tracking flags and clear caches
       polylinesDrawnRef.current = false;
       currentPolylineDataRef.current = null;
+      currentSelectedRoutesRef.current = [];
+      routeStopsCacheRef.current.clear();
+      lastFetchedRoutesRef.current.clear();
     };
   }, [startVehicleTracking, stopVehicleTracking, clearMapElements, clearVehicleMarkers]);
 
@@ -656,20 +736,25 @@ const MapComponent: React.FC<MapProps> = ({
       // Check if polyline data has actually changed
       const hasPolylineDataChanged = JSON.stringify(currentPolylineDataRef.current) !== JSON.stringify(polylineData);
       
+      // Check if selected routes have changed
+      const hasSelectedRoutesChanged = JSON.stringify(currentSelectedRoutesRef.current) !== JSON.stringify(selectedRoutesForMap);
+      
       if (polylineData && polylineData.result) {
-        // Only redraw if data has changed or polylines haven't been drawn yet
-        if (hasPolylineDataChanged || !polylinesDrawnRef.current) {
-          console.log('Polyline data provided and changed, drawing from GeoJSON structure');
+        // Only redraw if data has changed, routes have changed, or polylines haven't been drawn yet
+        if (hasPolylineDataChanged || hasSelectedRoutesChanged || !polylinesDrawnRef.current) {
+          console.log('Polyline data or routes changed, drawing from GeoJSON structure');
           currentPolylineDataRef.current = polylineData;
+          currentSelectedRoutesRef.current = [...selectedRoutesForMap];
           await drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
           polylinesDrawnRef.current = true;
         } else {
-          console.log('Polyline data unchanged, preserving existing polylines');
+          console.log('Polyline data and routes unchanged, preserving existing polylines');
         }
       } else if (selectedRoutesForMap && selectedRoutesForMap.length > 0) {
         // Only redraw if routes have changed or polylines haven't been drawn yet
-        if (!polylinesDrawnRef.current) {
-          console.log('No polyline data provided, falling back to legacy API');
+        if (hasSelectedRoutesChanged || !polylinesDrawnRef.current) {
+          console.log('Routes changed, falling back to legacy API');
+          currentSelectedRoutesRef.current = [...selectedRoutesForMap];
           await drawRoutePaths(selectedRoutesForMap);
           polylinesDrawnRef.current = true;
         } else {
@@ -677,8 +762,13 @@ const MapComponent: React.FC<MapProps> = ({
         }
       } else if (selectedRoutesForMap.length === 0 && polylinesDrawnRef.current) {
         // Only clear if we have no routes selected and polylines were previously drawn
-        console.log('No routes selected, clearing polylines');
+        console.log('No routes selected, clearing polylines and resetting state');
         clearRouteElements(true, true);
+        polylinesDrawnRef.current = false;
+        currentPolylineDataRef.current = null;
+        currentSelectedRoutesRef.current = [];
+        // Clear cache when no routes are selected to free memory
+        routeStopsCacheRef.current.clear();
       }
     };
 

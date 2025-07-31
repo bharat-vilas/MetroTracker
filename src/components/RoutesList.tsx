@@ -31,18 +31,27 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
     setLoading(true);
     try {
       const routesData = await apiService.getRoutes();
-      if (routesData?.routes) {
+      if (routesData?.routes && routesData.routes.length > 0) {
         setRoutes(routesData.routes);
         toast({
           title: "Routes Loaded",
           description: `Found ${routesData.routes.length} routes`,
         });
+      } else {
+        // No data available
+        setRoutes([]);
+        toast({
+          title: "No Routes Available",
+          description: "No route data is available at this time",
+          variant: "default"
+        });
       }
     } catch (error) {
       console.error('Failed to fetch routes:', error);
+      setRoutes([]);
       toast({
         title: "Error",
-        description: "Failed to load routes",
+        description: "Failed to load routes. Please check your connection.",
         variant: "destructive"
       });
     } finally {
@@ -71,7 +80,7 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
         setStopFilter('all'); // Reset filter to 'all' when fetching new stops
     try {
       const stopsData = await apiService.getStopsForRoute(route.name);
-      if (stopsData?.stops) {
+      if (stopsData?.stops && stopsData.stops.length > 0) {
         // Clean and deduplicate stops data
         const cleanStops = stopsData.stops.map(stop => ({
           ...stop,
@@ -86,8 +95,14 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
           description: `Found ${cleanStops.length} stops for ${route.name}`,
         });
       } else {
+        // No stops data available
         setStops([]);
         setFilteredStops([]);
+        toast({
+          title: "No Stops Available",
+          description: `No stop data available for ${route.name}`,
+          variant: "default"
+        });
       }
     } catch (error) {
       console.error('Failed to fetch stops:', error);
@@ -95,7 +110,7 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
       setFilteredStops([]);
       toast({
         title: "Error",
-        description: "Failed to load stops",
+        description: "Failed to load stops. Please check your connection.",
         variant: "destructive"
       });
     } finally {
@@ -197,6 +212,24 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-muted-foreground">Loading routes...</span>
+            </div>
+          ) : routes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <MapPin className="w-12 h-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium text-foreground mb-2">No Routes Available</h3>
+              <p className="text-sm text-muted-foreground mb-4 max-w-xs">
+                No route data is currently available. Please check your connection and try again.
+              </p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleRefresh}
+                className="gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Retry
+              </Button>
             </div>
           ) : (
             <div className="space-y-1">
@@ -281,6 +314,15 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
                               {loadingStops ? (
                                 <div className="flex items-center justify-center py-8">
                                   <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
+                                  <span className="ml-2 text-muted-foreground">Loading stops...</span>
+                                </div>
+                              ) : filteredStops.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center py-12 text-center">
+                                  <MapPin className="w-8 h-8 text-muted-foreground mb-3" />
+                                  <h4 className="text-md font-medium text-foreground mb-2">No Stops Available</h4>
+                                  <p className="text-sm text-muted-foreground">
+                                    No stop data is available for this route.
+                                  </p>
                                 </div>
                               ) : (
                                 filteredStops.map((stop, index) => (
@@ -309,12 +351,7 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
                                   </div>
                                 ))
                               )}
-                              
-                              {filteredStops.length === 0 && !loadingStops && (
-                                <div className="text-center text-muted-foreground py-8">
-                                  No stops found
-                                </div>
-                              )}
+
                             </div>
                           </ScrollArea>
                         </div>
