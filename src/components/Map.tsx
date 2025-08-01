@@ -809,46 +809,77 @@ const MapComponent: React.FC<MapComponentProps> = ({
   // Handle polyline data changes (new primary method) - with independence from vehicle updates and debouncing
   useEffect(() => {
     const updatePolylines = async () => {
-      // Rate limiting for polyline updates: minimum 2 seconds between updates
+      if (!mapRef.current) {
+        console.log('Map not ready, skipping polyline update');
+        return;
+      }
+
+      // Rate limiting for polyline updates: minimum 1 second between updates
       const now = Date.now();
-      if (now - lastPolylineUpdateRef.current < 2000) {
+      if (now - lastPolylineUpdateRef.current < 1000) {
         console.log('Rate limiting: Skipping polyline update (too frequent)');
         return;
       }
       
-      // Check if polyline data has actually changed
-      const hasPolylineDataChanged = JSON.stringify(currentPolylineDataRef.current) !== JSON.stringify(polylineData);
+      // Use simpler comparison for selected routes (by IDs only)
+      const currentRouteIds = currentSelectedRoutesRef.current.map(r => r.id).sort().join(',');
+      const newRouteIds = selectedRoutesForMap.map(r => r.id).sort().join(',');
+      const hasSelectedRoutesChanged = currentRouteIds !== newRouteIds;
       
-      // Check if selected routes have changed
-      const hasSelectedRoutesChanged = JSON.stringify(currentSelectedRoutesRef.current) !== JSON.stringify(selectedRoutesForMap);
+      // Check if polyline data has changed (only check if it exists)
+      const hasPolylineDataChanged = polylineData && (!currentPolylineDataRef.current || 
+        currentPolylineDataRef.current?.result?.length !== polylineData?.result?.length);
       
-      if (polylineData && polylineData.result) {
+      console.log('Map update check:', {
+        hasPolylineDataChanged,
+        hasSelectedRoutesChanged,
+        polylinesDrawn: polylinesDrawnRef.current,
+        selectedRoutesCount: selectedRoutesForMap.length,
+        currentRoutesCount: currentSelectedRoutesRef.current.length
+      });
+      
+      if (polylineData && polylineData.result && polylineData.result.length > 0) {
         // Only redraw if data has changed, routes have changed, or polylines haven't been drawn yet
         if (hasPolylineDataChanged || hasSelectedRoutesChanged || !polylinesDrawnRef.current) {
           lastPolylineUpdateRef.current = now;
-          console.log('Polyline data or routes changed, drawing from provided GeoJSON structure (no API calls)');
+          console.log('Drawing polylines - Reason:', {
+            dataChanged: hasPolylineDataChanged,
+            routesChanged: hasSelectedRoutesChanged,
+            notDrawn: !polylinesDrawnRef.current
+          });
+          
           currentPolylineDataRef.current = polylineData;
           currentSelectedRoutesRef.current = [...selectedRoutesForMap];
-          await drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
-          polylinesDrawnRef.current = true;
+          
+          try {
+            await drawPolylinesFromGeoJSON(polylineData, selectedRoutesForMap.length > 0 ? selectedRoutesForMap : undefined);
+            polylinesDrawnRef.current = true;
+            console.log('Polylines drawn successfully');
+          } catch (error) {
+            console.error('Failed to draw polylines:', error);
+          }
         } else {
-          console.log('Polyline data and routes unchanged, preserving existing polylines');
+          console.log('Polylines preserved - no changes detected');
         }
       } else if (selectedRoutesForMap && selectedRoutesForMap.length > 0) {
-        // Only use fallback API method if no polylineData is provided
+        // Fallback to API method only if no polylineData is provided
         if (hasSelectedRoutesChanged || !polylinesDrawnRef.current) {
           lastPolylineUpdateRef.current = now;
-          console.log('No polylineData provided, falling back to API calls (this should be avoided)');
+          console.log('Using fallback API method for polylines');
           currentSelectedRoutesRef.current = [...selectedRoutesForMap];
-          await drawRoutePaths(selectedRoutesForMap);
-          polylinesDrawnRef.current = true;
-        } else {
-          console.log('Routes unchanged, preserving existing polylines');
+          
+          try {
+            await drawRoutePaths(selectedRoutesForMap);
+            polylinesDrawnRef.current = true;
+            console.log('Fallback polylines drawn successfully');
+          } catch (error) {
+            console.error('Failed to draw fallback polylines:', error);
+          }
         }
       } else if (selectedRoutesForMap.length === 0 && polylinesDrawnRef.current) {
-        // Only clear if we have no routes selected and polylines were previously drawn
+        // Clear polylines only when no routes are selected
         lastPolylineUpdateRef.current = now;
-        console.log('No routes selected, clearing polylines and resetting state');
+        console.log('Clearing all polylines - no routes selected');
         clearRouteElements(true, true);
         polylinesDrawnRef.current = false;
         currentPolylineDataRef.current = null;
@@ -856,14 +887,14 @@ const MapComponent: React.FC<MapComponentProps> = ({
       }
     };
 
-    // Debounce polyline updates to prevent rapid successive calls
+    // Use longer debounce to reduce flickering
     if (debounceTimeoutRef.current) {
       clearTimeout(debounceTimeoutRef.current);
     }
     
     debounceTimeoutRef.current = setTimeout(() => {
       updatePolylines();
-    }, 300); // 300ms debounce delay
+    }, 500); // 500ms debounce delay to reduce flickering
 
     return () => {
       if (debounceTimeoutRef.current) {

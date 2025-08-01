@@ -77,11 +77,24 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
     fetchRoutes();
   };
 
-  const fetchStops = async (route: ApiRoute) => {
+  const fetchStops = useCallback(async (route: ApiRoute) => {
+    // Check if we already have cached stops for this route
+    const cachedStops = stopsCache.get(route.id);
+    if (cachedStops) {
+      console.log(`Using cached stops for route: ${route.name}`);
+      setSelectedRouteForModal(route);
+      setStops(cachedStops);
+      setFilteredStops(cachedStops);
+      setStopFilter('all');
+      return;
+    }
+
     setSelectedRouteForModal(route);
     setLoadingStops(true);
-        setStopFilter('all'); // Reset filter to 'all' when fetching new stops
+    setStopFilter('all'); // Reset filter to 'all' when fetching new stops
+    
     try {
+      console.log(`Fetching stops for route: ${route.name} (not cached)`);
       const stopsData = await apiService.getStopsForRoute(route.name);
       if (stopsData?.stops && stopsData.stops.length > 0) {
         // Clean and deduplicate stops data
@@ -90,7 +103,10 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
           name: stop.name?.trim() || 'Unknown Stop' // Clean whitespace and handle undefined names
         }));
         
-        console.log('Fetched stops for', route.name, ':', cleanStops);
+        // Cache the stops data
+        stopsCache.set(route.id, cleanStops);
+        
+        console.log('Fetched and cached stops for', route.name, ':', cleanStops.length);
         setStops(cleanStops);
         setFilteredStops(cleanStops);
         toast({
@@ -98,7 +114,8 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
           description: `Found ${cleanStops.length} stops for ${route.name}`,
         });
       } else {
-        // No stops data available
+        // Cache empty result too
+        stopsCache.set(route.id, []);
         setStops([]);
         setFilteredStops([]);
         toast({
@@ -119,7 +136,7 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
     } finally {
       setLoadingStops(false);
     }
-  };
+  }, [toast]);
 
   const handleFilterChange = (value: string) => {
     console.log("Selected stop filter value:", value);
