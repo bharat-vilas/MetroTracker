@@ -15,8 +15,30 @@ interface RoutesListProps {
   onRoutesForMap?: (selectedRoutes: ApiRoute[]) => void;
 }
 
-// Cache for stops data to avoid repeated API calls
-const stopsCache = new Map<string, RouteStop[]>();
+// Cache for stops data to avoid repeated API calls - Global cache
+const stopsCache = new Map<string, { stops: RouteStop[]; timestamp: number }>();
+const STOPS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+// Helper function to check cache validity
+const getCachedStops = (routeId: string): RouteStop[] | null => {
+  const cached = stopsCache.get(routeId);
+  if (cached && Date.now() - cached.timestamp < STOPS_CACHE_TTL) {
+    console.log(`Using cached stops for route: ${routeId}`);
+    return cached.stops;
+  }
+  if (cached) {
+    stopsCache.delete(routeId); // Remove expired cache
+  }
+  return null;
+};
+
+const setCachedStops = (routeId: string, stops: RouteStop[]): void => {
+  stopsCache.set(routeId, {
+    stops,
+    timestamp: Date.now()
+  });
+  console.log(`Cached stops for route: ${routeId} (${stops.length} stops)`);
+};
 
 const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, onRoutesForMap }) => {
   const [routes, setRoutes] = useState<ApiRoute[]>([]);
@@ -79,9 +101,8 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
 
   const fetchStops = useCallback(async (route: ApiRoute) => {
     // Check if we already have cached stops for this route
-    const cachedStops = stopsCache.get(route.id);
+    const cachedStops = getCachedStops(route.id);
     if (cachedStops) {
-      console.log(`Using cached stops for route: ${route.name}`);
       setSelectedRouteForModal(route);
       setStops(cachedStops);
       setFilteredStops(cachedStops);
@@ -104,7 +125,7 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
         }));
         
         // Cache the stops data
-        stopsCache.set(route.id, cleanStops);
+        setCachedStops(route.id, cleanStops);
         
         console.log('Fetched and cached stops for', route.name, ':', cleanStops.length);
         setStops(cleanStops);
@@ -115,7 +136,7 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
         });
       } else {
         // Cache empty result too
-        stopsCache.set(route.id, []);
+        setCachedStops(route.id, []);
         setStops([]);
         setFilteredStops([]);
         toast({

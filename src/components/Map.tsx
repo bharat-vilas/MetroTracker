@@ -62,13 +62,15 @@ interface MapComponentProps {
   onVehicleSelect?: (vehicleId: string) => void;
   selectedRoutesForMap?: ApiRoute[];
   polylineData?: PolylineResponse;
+  isLoadingPolylines?: boolean;
 }
 
 const MapComponent: React.FC<MapComponentProps> = ({
   selectedRoute,
   onVehicleSelect,
   selectedRoutesForMap = [],
-  polylineData
+  polylineData,
+  isLoadingPolylines = false
 }) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -497,8 +499,9 @@ const MapComponent: React.FC<MapComponentProps> = ({
       }
     }
 
-    // Fit map to show all polylines
-    if (allBounds.length > 0) {
+    // Only fit bounds on initial load or when specifically requested
+    // Don't auto-fit when user is just selecting/deselecting routes
+    if (allBounds.length > 0 && !polylinesDrawnRef.current) {
       const group = new L.FeatureGroup();
       allBounds.forEach(bounds => {
         group.addLayer(L.rectangle(bounds, { stroke: false, fill: false }));
@@ -920,6 +923,16 @@ const MapComponent: React.FC<MapComponentProps> = ({
           error={connectionError} 
           onDismiss={() => setConnectionError(null)} 
         />
+      )}
+      
+      {/* Polyline loading overlay */}
+      {isLoadingPolylines && (
+        <div className="absolute inset-0 bg-black/20 flex items-center justify-center z-[500]">
+          <div className="bg-white rounded-lg shadow-lg p-4 flex items-center space-x-3">
+            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+            <span className="text-sm font-medium text-gray-700">Loading route data...</span>
+          </div>
+        </div>
       )}
     </div>
   );

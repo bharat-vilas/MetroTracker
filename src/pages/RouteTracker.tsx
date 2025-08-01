@@ -3,16 +3,27 @@ import { ApiRoute, apiService } from '@/services/apiService';
 import Header from '@/components/Header';
 import MapComponent from '@/components/Map';
 import RoutesList from '@/components/RoutesList';
+import { RefreshCw } from 'lucide-react';
 
 const RouteTracker: React.FC = () => {
   const [selectedRoute, setSelectedRoute] = useState<ApiRoute | null>(null);
   const [selectedRoutesForMap, setSelectedRoutesForMap] = useState<ApiRoute[]>([]);
   const [polylineData, setPolylineData] = useState<any>(null);
+  const [isLoadingPolylines, setIsLoadingPolylines] = useState<boolean>(true);
 
   useEffect(() => {
     const fetchInitialData = async () => {
-      const polylineData = await apiService.getGeoJSONPolylines();
-      setPolylineData(polylineData);
+      setIsLoadingPolylines(true);
+      try {
+        console.log('Fetching initial polyline data...');
+        const polylineData = await apiService.getGeoJSONPolylines();
+        setPolylineData(polylineData);
+        console.log('Polyline data loaded successfully');
+      } catch (error) {
+        console.error('Failed to load initial polyline data:', error);
+      } finally {
+        setIsLoadingPolylines(false);
+      }
     };
 
     fetchInitialData();
@@ -41,10 +52,11 @@ const RouteTracker: React.FC = () => {
           />
         </div>
         <div className="flex-1">
-          <MapComponent 
-            selectedRoutesForMap={selectedRoutesForMap} 
-            polylineData={polylineData}
-          />
+        <MapComponent 
+          selectedRoutesForMap={selectedRoutesForMap}
+          polylineData={polylineData}
+          isLoadingPolylines={isLoadingPolylines}
+        />
         </div>
       </div>
     </div>
