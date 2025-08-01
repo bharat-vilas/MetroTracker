@@ -16,28 +16,37 @@ interface RoutesListProps {
 }
 
 // Cache for stops data to avoid repeated API calls - Global cache
-const stopsCache = new Map<string, { stops: RouteStop[]; timestamp: number }>();
+const stopsCache = new Map<string, { stops: RouteStop[]; timestamp: number; status: 'success' | 'error' | 'loading' }>();
+const pendingRequests = new Map<string, Promise<any>>();
 const STOPS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const ERROR_CACHE_TTL = 5 * 60 * 1000; // 5 minutes for errors
 
 // Helper function to check cache validity
-const getCachedStops = (routeId: string): RouteStop[] | null => {
+const getCachedStops = (routeId: string): { stops: RouteStop[]; fromCache: boolean } | null => {
   const cached = stopsCache.get(routeId);
-  if (cached && Date.now() - cached.timestamp < STOPS_CACHE_TTL) {
-    console.log(`Using cached stops for route: ${routeId}`);
-    return cached.stops;
-  }
   if (cached) {
-    stopsCache.delete(routeId); // Remove expired cache
+    const now = Date.now();
+    const ttl = cached.status === 'error' ? ERROR_CACHE_TTL : STOPS_CACHE_TTL;
+    
+    if (now - cached.timestamp < ttl) {
+      console.log(`Using cached stops for route: ${routeId} (status: ${cached.status})`);
+      return { stops: cached.stops, fromCache: true };
+    } else {
+      // Remove expired cache
+      stopsCache.delete(routeId);
+      console.log(`Cache expired for route: ${routeId}`);
+    }
   }
   return null;
 };
 
-const setCachedStops = (routeId: string, stops: RouteStop[]): void => {
+const setCachedStops = (routeId: string, stops: RouteStop[], status: 'success' | 'error' = 'success'): void => {
   stopsCache.set(routeId, {
     stops,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    status
   });
-  console.log(`Cached stops for route: ${routeId} (${stops.length} stops)`);
+  console.log(`Cached stops for route: ${routeId} (${stops.length} stops, status: ${status})`);
 };
 
 const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, onRoutesForMap }) => {
@@ -100,64 +109,124 @@ const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, o
   };
 
   const fetchStops = useCallback(async (route: ApiRoute) => {
+    console.log(`fetchStops called for route: ${route.name} (ID: ${route.id})`);
+    
+    // Always set the selected route for modal first
+    setSelectedRouteForModal(route);
+    setStopFilter('all');
+    
     // Check if we already have cached stops for this route
-    const cachedStops = getCachedStops(route.id);
-    if (cachedStops) {
-      setSelectedRouteForModal(route);
-      setStops(cachedStops);
-      setFilteredStops(cachedStops);
-      setStopFilter('all');
+    const cachedResult = getCachedStops(route.id);
+    if (cachedResult && cachedResult.fromCache) {
+      console.log(`Using cached data for route ${route.name}`);
+      setStops(cachedResult.stops);
+      setFilteredStops(cachedResult.stops);
+      setLoadingStops(false);
       return;
     }
-
-    setSelectedRouteForModal(route);
-    setLoadingStops(true);
-    setStopFilter('all'); // Reset filter to 'all' when fetching new stops
     
-    try {
-      console.log(`Fetching stops for route: ${route.name} (not cached)`);
-      const stopsData = await apiService.getStopsForRoute(route.name);
-      if (stopsData?.stops && stopsData.stops.length > 0) {
-        // Clean and deduplicate stops data
-        const cleanStops = stopsData.stops.map(stop => ({
-          ...stop,
-          name: stop.name?.trim() || 'Unknown Stop' // Clean whitespace and handle undefined names
-        }));
-        
-        // Cache the stops data
-        setCachedStops(route.id, cleanStops);
-        
-        console.log('Fetched and cached stops for', route.name, ':', cleanStops.length);
-        setStops(cleanStops);
-        setFilteredStops(cleanStops);
-        toast({
-          title: "Stops Loaded",
-          description: `Found ${cleanStops.length} stops for ${route.name}`,
-        });
-      } else {
-        // Cache empty result too
-        setCachedStops(route.id, []);
+    // Check if there's already a pending request for this route
+    const existingRequest = pendingRequests.get(route.id);
+    if (existingRequest) {
+      console.log(`Request already pending for route: ${route.name}`);
+      setLoadingStops(true);
+      try {
+        const result = await existingRequest;
+        setStops(result);
+        setFilteredStops(result);
+      } catch (error) {
+        console.error('Pending request failed:', error);
         setStops([]);
         setFilteredStops([]);
+      } finally {
+        setLoadingStops(false);
+      }
+      return;
+    }
+    
+    // Start new request
+    setLoadingStops(true);
+    setStops([]);
+    setFilteredStops([]);
+    
+    const requestPromise = (async () => {
+      try {
+        console.log(`Making API call for route: ${route.name}`);
+        const stopsData = await apiService.getStopsForRoute(route.name);
+        
+        if (stopsData?.stops && Array.isArray(stopsData.stops) && stopsData.stops.length > 0) {
+          // Clean and deduplicate stops data
+          const cleanStops = stopsData.stops.map(stop => ({
+            ...stop,
+            name: stop.name?.trim() || 'Unknown Stop'
+          }));
+          
+          // Cache successful result
+          setCachedStops(route.id, cleanStops, 'success');
+          console.log(`Successfully fetched and cached ${cleanStops.length} stops for route: ${route.name}`);
+          
+          toast({
+            title: "Stops Loaded",
+            description: `Found ${cleanStops.length} stops for ${route.name}`,
+          });
+          
+          return cleanStops;
+        } else {
+          // Cache empty result
+          setCachedStops(route.id, [], 'success');
+          console.log(`No stops found for route: ${route.name}`);
+          
+          toast({
+            title: "No Stops Available",
+            description: `No stop data available for ${route.name}`,
+            variant: "default"
+          });
+          
+          return [];
+        }
+      } catch (error) {
+        console.error(`Failed to fetch stops for route ${route.name}:`, error);
+        
+        // Cache error result to prevent immediate retries
+        setCachedStops(route.id, [], 'error');
+        
         toast({
-          title: "No Stops Available",
-          description: `No stop data available for ${route.name}`,
-          variant: "default"
+          title: "Error Loading Stops",
+          description: `Failed to load stops for ${route.name}. Please try again later.`,
+          variant: "destructive"
         });
+        
+        throw error;
+      }
+    })();
+    
+    // Store the pending request
+    pendingRequests.set(route.id, requestPromise);
+    
+    try {
+      const result = await requestPromise;
+      
+      // Only update state if this is still the selected route
+      if (selectedRouteForModal?.id === route.id) {
+        setStops(result);
+        setFilteredStops(result);
       }
     } catch (error) {
-      console.error('Failed to fetch stops:', error);
-      setStops([]);
-      setFilteredStops([]);
-      toast({
-        title: "Error",
-        description: "Failed to load stops. Please check your connection.",
-        variant: "destructive"
-      });
+      // Only update state if this is still the selected route
+      if (selectedRouteForModal?.id === route.id) {
+        setStops([]);
+        setFilteredStops([]);
+      }
     } finally {
-      setLoadingStops(false);
+      // Clean up pending request
+      pendingRequests.delete(route.id);
+      
+      // Only update loading state if this is still the selected route
+      if (selectedRouteForModal?.id === route.id) {
+        setLoadingStops(false);
+      }
     }
-  }, [toast]);
+  }, [toast, selectedRouteForModal]);
 
   const handleFilterChange = (value: string) => {
     console.log("Selected stop filter value:", value);
