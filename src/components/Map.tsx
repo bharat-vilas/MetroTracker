@@ -396,7 +396,8 @@ const MapComponent: React.FC<MapComponentProps> = ({
       }
     }
 
-    processedPolylines.forEach((polylineInfo, index) => {
+    // FIXED: Use for...of loop instead of forEach to handle async/await properly
+    for (const [index, polylineInfo] of processedPolylines.entries()) {
       // If filtering by routes, check if this polyline matches any selected route
       if (filterRoutes && filterRoutes.length > 0) {
         const matchingRoute = filterRoutes.find(route => 
@@ -407,7 +408,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
         
         if (!matchingRoute) {
           console.log(`Skipping polyline ${polylineInfo.name} - not in selected routes`);
-          return;
+          continue;
         }
       }
 
@@ -494,7 +495,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
       } else {
         console.warn(`No valid coordinates for polyline: ${polylineInfo.name}`);
       }
-    });
+    }
 
     // Fit map to show all polylines
     if (allBounds.length > 0) {
