@@ -369,35 +369,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
       });
     }
 
-    // Fetch stops for routes only when needed (apiService handles caching automatically)
-    if (routesToFetchStops.length > 0) {
-      console.log(`Will fetch stops for ${routesToFetchStops.length} routes when drawing markers (cached by apiService)`);
-      
-      // Pre-fetch a few routes to populate cache, but don't block rendering
-      const priorityRoutes = routesToFetchStops.slice(0, 2); // Only first 2 routes
-      if (priorityRoutes.length > 0) {
-        console.log(`Pre-fetching stops for ${priorityRoutes.length} priority routes`);
-        try {
-          const stopPromises = priorityRoutes.map(async (route) => {
-            try {
-              const stopsData = await apiService.getStopsForRoute(route.name);
-              if (stopsData?.stops && Array.isArray(stopsData.stops) && stopsData.stops.length > 0) {
-                const cacheKey = route.segment_id || route.id;
-                routeStopsMap.set(cacheKey, stopsData.stops);
-                console.log(`Pre-fetched stops for route: ${route.name} (${stopsData.stops.length} stops)`);
-              }
-            } catch (error) {
-              console.warn(`Failed to pre-fetch stops for route ${route.name}:`, error);
-            }
-          });
-          
-          await Promise.all(stopPromises);
-        } catch (error) {
-          console.warn('Error pre-fetching priority route stops:', error);
-        }
-      }
-    }
-
     // FIXED: Use for...of loop instead of forEach to handle async/await properly
     for (const [index, polylineInfo] of processedPolylines.entries()) {
       // If filtering by routes, check if this polyline matches any selected route
