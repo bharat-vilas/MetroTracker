@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService, ApiRoute, RouteStop } from '@/services/apiService';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,9 @@ interface RoutesListProps {
   selectedRoute: ApiRoute | null;
   onRoutesForMap?: (selectedRoutes: ApiRoute[]) => void;
 }
+
+// Cache for stops data to avoid repeated API calls
+const stopsCache = new Map<string, RouteStop[]>();
 
 const RoutesList: React.FC<RoutesListProps> = ({ onRouteSelect, selectedRoute, onRoutesForMap }) => {
   const [routes, setRoutes] = useState<ApiRoute[]>([]);

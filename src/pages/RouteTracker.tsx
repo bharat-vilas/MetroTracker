@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ApiRoute, apiService } from '@/services/apiService';
 import Header from '@/components/Header';
 import MapComponent from '@/components/Map';
@@ -10,42 +10,36 @@ const RouteTracker: React.FC = () => {
   const [polylineData, setPolylineData] = useState<any>(null);
 
   useEffect(() => {
-    const fetchPolylines = async () => {
+    const fetchInitialData = async () => {
       const polylineData = await apiService.getGeoJSONPolylines();
       setPolylineData(polylineData);
     };
-    
-    fetchPolylines();
+
+    fetchInitialData();
   }, []);
 
-  const handleRouteSelect = (route: ApiRoute) => {
+  const handleRouteSelect = useCallback((route: ApiRoute) => {
     setSelectedRoute(route);
-  };
+  }, []);
   
-  const handleRoutesForMap = (routes: ApiRoute[]) => {
+  const handleRoutesForMap = useCallback((routes: ApiRoute[]) => {
     setSelectedRoutesForMap(routes);
-  };
+  }, []);
 
   return (
-    <div className="h-screen flex flex-col">
-      <Header />
-      <div className="flex-1 relative">
-        {/* Map as background */}
-        <div className="absolute inset-0">
-          <MapComponent 
-            selectedRoutesForMap={selectedRoutesForMap} 
-            polylineData={polylineData}
-          />
-        </div>
-        
-        {/* Routes list overlay */}
-        <div className="absolute top-0 left-0 z-10">
-          <RoutesList 
-            onRouteSelect={handleRouteSelect}
-            selectedRoute={selectedRoute}
-            onRoutesForMap={handleRoutesForMap}
-          />
-        </div>
+    <div className="h-screen flex">
+      <div className="w-80 z-10">
+        <RoutesList 
+          onRouteSelect={handleRouteSelect}
+          selectedRoute={selectedRoute}
+          onRoutesForMap={handleRoutesForMap}
+        />
+      </div>
+      <div className="flex-1">
+        <MapComponent 
+          selectedRoutesForMap={selectedRoutesForMap} 
+          polylineData={polylineData}
+        />
       </div>
     </div>
   );
