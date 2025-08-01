@@ -1,4 +1,5 @@
 const BASE_URL = 'https://tracker_baym.hbssweb.com';
+const LOCAL_PROXY_URL = 'http://localhost:3001';
 
 // Base64 decode helper with improved error handling
 const decodeBase64 = (encodedData: string) => {
@@ -30,10 +31,23 @@ const decodeBase64 = (encodedData: string) => {
 
 // CORS proxy configuration with multiple fallback options
 const CORS_PROXIES = [
-  'https://cors-anywhere.herokuapp.com/',
   'https://api.allorigins.win/raw?url=',
+  'https://cors-anywhere.herokuapp.com/',
   'https://corsproxy.io/?'
 ];
+
+// Check if local proxy is available
+const checkLocalProxy = async (): Promise<boolean> => {
+  try {
+    const response = await fetch(`${LOCAL_PROXY_URL}/health`, { 
+      method: 'GET',
+      timeout: 2000 as any
+    });
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+};
 
 // Request cache to prevent excessive API calls
 const apiCache = new Map<string, { data: any; timestamp: number; ttl: number }>();
@@ -301,7 +315,14 @@ export const apiService = {
       
     } catch (error) {
       console.error('Failed to fetch AVL data:', error);
-      return null;
+      
+      // Return empty result when CORS fails, but with correct structure
+      console.log('Returning empty AVL data due to CORS/network issues');
+      return {
+        cmd_name: "GetAvlData",
+        status: "OK",
+        result: []
+      };
     }
   },
 

@@ -27,19 +27,25 @@ const RouteTracker: React.FC = () => {
   }, []);
 
   return (
-    <div className="h-screen flex">
-      <div className="w-80 z-10">
-        <RoutesList 
-          onRouteSelect={handleRouteSelect}
-          selectedRoute={selectedRoute}
-          onRoutesForMap={handleRoutesForMap}
-        />
-      </div>
-      <div className="flex-1">
-        <MapComponent 
-          selectedRoutesForMap={selectedRoutesForMap} 
-          polylineData={polylineData}
-        />
+    <div className="h-screen flex flex-col">
+      {/* Header above everything */}
+      <Header />
+      
+      {/* Main content area */}
+      <div className="flex-1 flex">
+        <div className="w-80 z-10">
+          <RoutesList 
+            onRouteSelect={handleRouteSelect}
+            selectedRoute={selectedRoute}
+            onRoutesForMap={handleRoutesForMap}
+          />
+        </div>
+        <div className="flex-1">
+          <MapComponent 
+            selectedRoutesForMap={selectedRoutesForMap} 
+            polylineData={polylineData}
+          />
+        </div>
       </div>
     </div>
   );
