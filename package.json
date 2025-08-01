@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Bus tracking application with real-time vehicle monitoring",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "dev": "npm run dev:app",
     "dev:app": "vite",
