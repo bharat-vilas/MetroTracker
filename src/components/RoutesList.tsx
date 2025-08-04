@@ -32,49 +32,16 @@ interface RoutesListProps {
   onRouteSelect: (route: ApiRoute) => void;
   selectedRoute: ApiRoute | null;
   onRoutesForMap?: (selectedRoutes: ApiRoute[]) => void;
+  selectedRoutesForMap: ApiRoute[];
+  setSelectedRoutesForMap: React.Dispatch<React.SetStateAction<ApiRoute[]>>;
 }
-
-// Cache for stops data to avoid repeated API calls - Global cache
-const stopsCache = new Map<
-  string,
-  {
-    stops: RouteStop[];
-    timestamp: number;
-    status: "success" | "error" | "loading";
-  }
->();
-const pendingRequests = new Map<string, Promise<any>>();
-const STOPS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
-const ERROR_CACHE_TTL = 5 * 60 * 1000; // 5 minutes for errors
-
-// Helper function to check cache validity
-const getCachedStops = (
-  routeId: string
-): { stops: RouteStop[]; fromCache: boolean } | null => {
-  const cached = stopsCache.get(routeId);
-  if (cached) {
-    const now = Date.now();
-    const ttl = cached.status === "error" ? ERROR_CACHE_TTL : STOPS_CACHE_TTL;
-
-    if (now - cached.timestamp < ttl) {
-      console.log(
-        `Using cached stops for route: ${routeId} (status: ${cached.status})`
-      );
-      return { stops: cached.stops, fromCache: true };
-    } else {
-      // Remove expired cache
-      stopsCache.delete(routeId);
-      console.log(`Cache expired for route: ${routeId}`);
-    }
-  }
-  return null;
-};
-
 
 const RoutesList: React.FC<RoutesListProps> = ({
   onRouteSelect,
   selectedRoute,
   onRoutesForMap,
+  selectedRoutesForMap,
+  setSelectedRoutesForMap,
 }) => {
   const [routes, setRoutes] = useState<ApiRoute[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -84,9 +51,6 @@ const RoutesList: React.FC<RoutesListProps> = ({
   const [selectedRouteForModal, setSelectedRouteForModal] =
     useState<ApiRoute | null>(null);
   const [stopFilter, setStopFilter] = useState<string>("all");
-  const [selectedRoutesForMap, setSelectedRoutesForMap] = useState<string[]>(
-    []
-  );
   const [selectAll, setSelectAll] = useState<boolean>(false);
   const { toast } = useToast();
 
@@ -209,40 +173,39 @@ const RoutesList: React.FC<RoutesListProps> = ({
   };
 
   const handleSelectAllChange = (checked: boolean) => {
-    setSelectAll(checked);
-    if (checked) {
-      const allRouteIds = routes.map((route) => route.id);
-      setSelectedRoutesForMap(allRouteIds);
-      onRoutesForMap?.(routes);
-    } else {
-      setSelectedRoutesForMap([]);
-      onRoutesForMap?.([]);
-    }
-  };
+  setSelectAll(checked);
+  if (checked) {
+    setSelectedRoutesForMap(routes); // routes is of type ApiRoute[]
+    onRoutesForMap?.(routes);
+  } else {
+    setSelectedRoutesForMap([]);
+    onRoutesForMap?.([]);
+  }
+}
 
   const handleRouteCheckboxChange = (routeId: string, checked: boolean) => {
-    let newSelectedRoutes;
+    let newSelectedRoutes: ApiRoute[];
+
     if (checked) {
-      newSelectedRoutes = [...selectedRoutesForMap, routeId];
+      const selectedRoute = routes.find(route => route.id === routeId);
+      if (!selectedRoute) return;
+
+      newSelectedRoutes = [...selectedRoutesForMap, selectedRoute];
     } else {
-      newSelectedRoutes = selectedRoutesForMap.filter((id) => id !== routeId);
+      newSelectedRoutes = selectedRoutesForMap.filter((r) => r.id !== routeId);
       setSelectAll(false);
     }
 
     setSelectedRoutesForMap(newSelectedRoutes);
-    const selectedRouteObjects = routes.filter((route) =>
-      newSelectedRoutes.includes(route.id)
-    );
-    onRoutesForMap?.(selectedRouteObjects);
+    onRoutesForMap?.(newSelectedRoutes);
 
-    // Update select all checkbox
     if (newSelectedRoutes.length === routes.length) {
       setSelectAll(true);
     }
-  };
+}
 
   return (
-    <div className="w-80 h-full bg-sidebar-bg backdrop-blur-sm border-r border-border flex flex-col max-h-screen">
+    <div className="w-35vw h-full bg-sidebar-bg backdrop-blur-sm border-r border-border flex flex-col max-h-screen" style={{height: "88vh"}}>
       {/* Header */}
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between">
@@ -330,7 +293,7 @@ const RoutesList: React.FC<RoutesListProps> = ({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2 flex-1 min-w-0">
                       <Checkbox
-                        checked={selectedRoutesForMap.includes(route.id)}
+                        checked={selectedRoutesForMap.some(r => r.id === route.id)}
                         onCheckedChange={(checked) =>
                           handleRouteCheckboxChange(
                             route.id,
@@ -343,7 +306,7 @@ const RoutesList: React.FC<RoutesListProps> = ({
                           <span className="text-sm font-medium truncate">
                             {route.name}
                           </span>
-                          {selectedRoutesForMap.includes(route.id) && (
+                          {selectedRoutesForMap.some(r => r.id === route.id) && (
                             <div
                               className="w-2 h-2 bg-primary rounded-full animate-pulse"
                               title="Displayed on map"

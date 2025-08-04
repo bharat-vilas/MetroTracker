@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { apiService, ApiRoute, Vehicle, RouteStop } from '@/services/apiService';
 import { PolylineResponse, processMultiplePolylines } from '@/lib/polylineUtils';
+import './Map.css'
 
 // Error notification component
 const ErrorNotification: React.FC<{ error: string; onDismiss: () => void }> = ({ error, onDismiss }) => (
@@ -40,8 +41,8 @@ const StatusIndicator: React.FC<{ status: 'connected' | 'error' | 'loading' }> =
   const config = statusConfig[status];
   
   return (
-    <div className="absolute top-4 left-4 z-[1000] bg-white rounded-lg shadow-md p-2">
-      <div className="flex items-center space-x-2">
+    <div className=" ml-8 absolute top-3 left-4 z-[1000] bg-white rounded-lg shadow-md p-2">
+      <div className=" flex items-center space-x-2">
         <div className={`w-3 h-3 rounded-full ${config.color} ${config.pulse ? 'animate-pulse' : ''}`}></div>
         <span className="text-sm font-medium text-gray-700">{config.text}</span>
       </div>
@@ -68,7 +69,7 @@ interface MapComponentProps {
 const MapComponent: React.FC<MapComponentProps> = ({
   selectedRoute,
   onVehicleSelect,
-  selectedRoutesForMap = [],
+  selectedRoutesForMap,
   polylineData,
   isLoadingPolylines = false
 }) => {
@@ -98,90 +99,22 @@ const MapComponent: React.FC<MapComponentProps> = ({
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'error' | 'loading'>('loading');
 
-  console.log('Map component rendering', { 
-    selectedRoute: selectedRoute?.name, 
-    selectedRoutesForMap: selectedRoutesForMap?.map(r => r.name),
-    polylineData: polylineData?.result?.length 
-  });
-
-  // Custom vehicle icon creator
   const createVehicleIcon = (vehicleId: string, speed: number = 0) => {
-    const color = '#ff6b35'; // Orange/red for active vehicles (more distinctive)
-    const isMoving = speed > 0;
-    
-    return L.divIcon({
-      html: `<div style="
-        width: 24px; 
-        height: 16px; 
-        background: linear-gradient(45deg, ${color}, #ff8c42); 
-        border: 2px solid white; 
-        border-radius: 6px; 
-        box-shadow: 0 3px 6px rgba(0,0,0,0.4);
-        position: relative;
-        ${isMoving ? 'animation: vehiclePulse 1.5s infinite;' : ''}
-      ">
-        <!-- Car body shape -->
-        <div style="
-          position: absolute;
-          top: 2px;
-          left: 2px;
-          right: 2px;
-          bottom: 2px;
-          background: ${color};
-          border-radius: 4px;
-        "></div>
-        <!-- Front windshield -->
-        <div style="
-          position: absolute;
-          top: 3px;
-          right: 3px;
-          width: 4px;
-          height: 8px;
-          background: rgba(255,255,255,0.7);
-          border-radius: 0 2px 2px 0;
-        "></div>
-        <!-- Rear windshield -->
-        <div style="
-          position: absolute;
-          top: 3px;
-          left: 3px;
-          width: 4px;
-          height: 8px;
-          background: rgba(255,255,255,0.7);
-          border-radius: 2px 0 0 2px;
-        "></div>
-        <!-- Car wheels -->
-        <div style="
-          position: absolute;
-          bottom: -2px;
-          left: 2px;
-          width: 4px;
-          height: 4px;
-          background: #333;
-          border-radius: 50%;
-        "></div>
-        <div style="
-          position: absolute;
-          bottom: -2px;
-          right: 2px;
-          width: 4px;
-          height: 4px;
-          background: #333;
-          border-radius: 50%;
-        "></div>
+  const isMoving = speed > 0;
+
+  return L.divIcon({
+    html: `
+      <div class="vehicle-emoji ${isMoving ? 'vehicle-pulse' : ''}">
+        🚗
       </div>
-      <style>
-        @keyframes vehiclePulse {
-          0% { transform: scale(1); box-shadow: 0 3px 6px rgba(0,0,0,0.4); }
-          50% { transform: scale(1.1); box-shadow: 0 4px 8px rgba(255,107,53,0.6); }
-          100% { transform: scale(1); box-shadow: 0 3px 6px rgba(0,0,0,0.4); }
-        }
-      </style>`,
-      className: `vehicle-marker vehicle-${vehicleId}`,
-      iconSize: [24, 16],
-      iconAnchor: [12, 8]
-    });
-  };
+    `,
+    className: `vehicle-marker vehicle-${vehicleId}`,
+    iconSize: [24, 24],
+    iconAnchor: [20, 5],
+  });
+};
+
+
 
   // Clear specific route elements (updated to be more selective)
   const clearRouteElements = useCallback((clearPolylines = true, clearStops = true) => {
@@ -210,12 +143,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
     }
   }, []);
 
-  // Function to preserve polylines when only updating vehicle data
-  const preservePolylines = useCallback(() => {
-    console.log('Preserving polylines during vehicle update');
-    // This function intentionally does nothing to preserve existing polylines
-    return;
-  }, []);
 
   // Clear all map elements (for complete cleanup)
   const clearMapElements = useCallback(() => {
@@ -235,350 +162,236 @@ const MapComponent: React.FC<MapComponentProps> = ({
 
   // Update vehicle markers with smooth transitions
   const updateVehicleMarkers = useCallback((vehicles: Vehicle[]) => {
-    if (!mapRef.current) return;
+  if (!mapRef.current) return;
 
-    vehicles.forEach(vehicle => {
-      const existingMarker = vehicleMarkersRef.current.get(vehicle.vehicle_id);
-      
-      if (existingMarker) {
-        // Smooth transition to new position
-        const currentLatLng = existingMarker.getLatLng();
-        const newLatLng = L.latLng(vehicle.lat || vehicle.latitude || 0, vehicle.lng || vehicle.longitude || 0);
-        
-        // Animate the marker to the new position
-        let start = Date.now();
-        const duration = 2000; // 2 seconds for smooth transition
-        
-        const animate = () => {
-          const elapsed = Date.now() - start;
-          const progress = Math.min(elapsed / duration, 1);
-          
-          // Easing function for smooth animation
-          const easeProgress = 1 - Math.pow(1 - progress, 3);
-          
-          const lat = currentLatLng.lat + (newLatLng.lat - currentLatLng.lat) * easeProgress;
-          const lng = currentLatLng.lng + (newLatLng.lng - currentLatLng.lng) * easeProgress;
-          
-          existingMarker.setLatLng([lat, lng]);
-          
-          if (progress < 1) {
-            requestAnimationFrame(animate);
-          }
-        };
-        
-        animate();
-      } else {
-        // Create new marker
-        const marker = L.marker([vehicle.lat || vehicle.latitude || 0, vehicle.lng || vehicle.longitude || 0], {
-          icon: createVehicleIcon(vehicle.vehicle_id, vehicle.speed || 0)
-        })
-        .bindPopup(`
-          <div class="p-2">
-            <h3 class="font-bold">${vehicle.vehicle_id}</h3>
-            <p class="text-sm">Driver: ${vehicle.driver_id || 'N/A'}</p>
-            <p class="text-sm">Route: ${vehicle.segment_id || 'N/A'}</p>
-            <p class="text-sm">Speed: ${vehicle.speed || 'N/A'} km/h</p>
-            <p class="text-sm">Direction: ${vehicle.angle || vehicle.direction || vehicle.heading || 'N/A'}°</p>
-            <p class="text-xs text-gray-500">Updated: ${vehicle.record_time || vehicle.device_time || 'N/A'}</p>
-            <p class="text-xs text-gray-500">Date: ${vehicle.record_date || 'N/A'}</p>
-          </div>
-        `)
-        .addTo(mapRef.current);
+  const newVehicleIds = new Set(vehicles.map(v => v.vehicle_id));
 
-        marker.on('click', () => {
-          onVehicleSelect?.(vehicle.vehicle_id);
-        });
+  // Update or add markers
+  vehicles.forEach(vehicle => {
+    const existingMarker = vehicleMarkersRef.current.get(vehicle.vehicle_id);
+    const latlng = L.latLng(vehicle.lat, vehicle.lng);
 
-        vehicleMarkersRef.current.set(vehicle.vehicle_id, marker);
-      }
-    });
+    if (existingMarker) {
+      existingMarker.setLatLng(latlng);
+    } else {
+      const marker = L.marker(latlng, {
+        icon: createVehicleIcon(vehicle.vehicle_id, vehicle.speed),
+        zIndexOffset: 1000,
+      }).addTo(mapRef.current!);
 
-    // Remove markers for vehicles no longer present
-    const currentVehicleIds = new Set(vehicles.map(v => v.vehicle_id));
-    vehicleMarkersRef.current.forEach((marker, vehicleId) => {
-      if (!currentVehicleIds.has(vehicleId)) {
-        mapRef.current?.removeLayer(marker);
-        vehicleMarkersRef.current.delete(vehicleId);
-      }
-    });
-  }, [onVehicleSelect, createVehicleIcon]);
+      vehicleMarkersRef.current.set(vehicle.vehicle_id, marker);
+    }
+  });
+
+  // Remove markers no longer in the new list
+  vehicleMarkersRef.current.forEach((marker, vehicleId) => {
+    if (!newVehicleIds.has(vehicleId)) {
+      mapRef.current!.removeLayer(marker);
+      vehicleMarkersRef.current.delete(vehicleId);
+    }
+  });
+}, []);
 
   // Create stop marker with color
   const createStopMarker = useCallback((color: string, stopIndex?: number) => {
-    const isFirstOrLast = stopIndex === 0 || stopIndex === -1;
-    const size = isFirstOrLast ? 16 : 12;
-    const borderWidth = isFirstOrLast ? 3 : 2;
-    
-    return L.divIcon({
-      html: `<div style="
-        width: ${size}px; 
-        height: ${size}px; 
-        background-color: ${color}; 
-        border: ${borderWidth}px solid white; 
-        border-radius: 50%; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-        ${isFirstOrLast ? 'border-color: #333;' : ''}
-        ${isFirstOrLast ? 'animation: stopPulse 2s infinite;' : ''}
-      "></div>
-      <style>
-        @keyframes stopPulse {
-          0% { transform: scale(1); }
-          50% { transform: scale(1.1); }
-          100% { transform: scale(1); }
-        }
-      </style>`,
-      className: `stop-marker ${isFirstOrLast ? 'terminal-stop' : 'regular-stop'}`,
-      iconSize: [size + borderWidth * 2, size + borderWidth * 2],
-      iconAnchor: [(size + borderWidth * 2) / 2, (size + borderWidth * 2) / 2]
-    });
-  }, []);
+    const size = 12;
+  const borderWidth = 2;
+
+  return L.divIcon({
+    html: `<div style="
+      width: ${size}px; 
+      height: ${size}px; 
+      background-color: ${color}; 
+      border: ${borderWidth}px solid white; 
+      border-radius: 50%; 
+      box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+    "></div>`,
+    className: 'stop-marker',
+    iconSize: [size + borderWidth * 2, size + borderWidth * 2],
+    iconAnchor: [(size + borderWidth * 2) / 2, (size + borderWidth * 2) / 2]
+  });
+}, []);
 
   // Draw polylines from GeoJSON-like data structure
-  const drawPolylinesFromGeoJSON = useCallback(async (polylineResponse: PolylineResponse, filterRoutes?: ApiRoute[]) => {
-    if (!mapRef.current || !polylineResponse?.result) {
-      console.warn('Map not ready or no polyline data');
-      return;
-    }
-
-    console.log('Drawing polylines from GeoJSON data:', polylineResponse.result.length);
-
-    // Only clear existing polylines and stops if we're showing different routes
-    clearRouteElements(true, true);
-
-    const processedPolylines = processMultiplePolylines(polylineResponse);
-    const allBounds: L.LatLngBounds[] = [];
-
-    // Fetch stops for routes (using apiService caching)
-    const routeStopsMap = new Map<string, RouteStop[]>();
-
-    // Determine which routes we need stops for
-    const routesToFetchStops = [];
-    if (filterRoutes && filterRoutes.length > 0) {
-      routesToFetchStops.push(...filterRoutes);
-    } else {
-      // Create route objects from polyline data for stop fetching
-      processedPolylines.forEach((polylineInfo) => {
-        routesToFetchStops.push({
-          id: polylineInfo.segmentId,
-          name: polylineInfo.name,
-          segment_id: polylineInfo.segmentId,
-          status: 'active',
-          startTime: '06:00',
-          endTime: '22:00'
-        } as ApiRoute);
-      });
-    }
-
-    // FIXED: Use for...of loop instead of forEach to handle async/await properly
-    for (const [index, polylineInfo] of processedPolylines.entries()) {
-      // If filtering by routes, check if this polyline matches any selected route
-      if (filterRoutes && filterRoutes.length > 0) {
-        const matchingRoute = filterRoutes.find(route => 
-          route.segment_id === polylineInfo.segmentId || 
-          route.id === polylineInfo.segmentId ||
-          route.name === polylineInfo.name
-        );
-        
-        if (!matchingRoute) {
-          console.log(`Skipping polyline ${polylineInfo.name} - not in selected routes`);
-          continue;
-        }
-      }
-
-      if (polylineInfo.coordinates.length > 0) {
-        console.log(`Drawing polyline for ${polylineInfo.name} with ${polylineInfo.coordinates.length} points`);
-        
-        // Create polyline with style from data
-        const routeLine = L.polyline(
-          polylineInfo.coordinates,
-          {
-            color: polylineInfo.style.color,
-            weight: polylineInfo.style.weight,
-            opacity: polylineInfo.style.opacity
-          }
-        ).bindPopup(`
-          <div class="p-2">
-            <h3 class="font-bold text-sm">${polylineInfo.name}</h3>
-            <p class="text-xs text-gray-600">Segment ID: ${polylineInfo.segmentId}</p>
-            <p class="text-xs text-gray-600">${polylineInfo.coordinates.length} points</p>
-            <div class="flex items-center mt-1">
-              <div style="
-                width: 12px; 
-                height: 12px; 
-                background-color: ${polylineInfo.style.color}; 
-                border-radius: 2px; 
-                margin-right: 4px;
-              "></div>
-              <span class="text-xs">Color: ${polylineInfo.style.color}</span>
-            </div>
-          </div>
-        `).addTo(mapRef.current);
-
-        routeLinesRef.current.push(routeLine);
-        allBounds.push(routeLine.getBounds());
-
-        // Add stop markers for this route (fetch on-demand if not in pre-fetch)
-        let routeStops = routeStopsMap.get(polylineInfo.segmentId);
-        
-        if (!routeStops) {
-          // Fetch stops on-demand (will use cache if available)
-          try {
-            console.log(`Fetching stops on-demand for route: ${polylineInfo.name}`);
-            const stopsData = await apiService.getStopsForRoute(polylineInfo.name);
-            if (stopsData?.stops && Array.isArray(stopsData.stops) && stopsData.stops.length > 0) {
-              routeStops = stopsData.stops;
-              routeStopsMap.set(polylineInfo.segmentId, routeStops);
-            }
-          } catch (error) {
-            console.warn(`Failed to fetch stops on-demand for route ${polylineInfo.name}:`, error);
-          }
-        }
-        
-        if (routeStops && routeStops.length > 0) {
-          console.log(`Adding ${routeStops.length} stop markers for route ${polylineInfo.name}`);
-          
-          routeStops.forEach((stop, stopIndex) => {
-            // Mark first and last stops differently
-            const adjustedIndex = stopIndex === routeStops.length - 1 ? -1 : stopIndex;
-            const stopIcon = createStopMarker(polylineInfo.style.color, adjustedIndex);
-            const marker = L.marker([stop.latitude, stop.longitude], { icon: stopIcon })
-              .bindPopup(`
-                <div class="p-2">
-                  <h3 class="font-bold text-sm">${stop.name}</h3>
-                  <p class="text-xs text-gray-600">Route: ${polylineInfo.name}</p>
-                  <p class="text-xs">Stop ${stopIndex + 1} of ${routeStops.length}</p>
-                  ${stop.eta ? `<p class="text-xs font-medium text-primary">ETA: ${stop.eta}</p>` : ''}
-                  <div class="flex items-center mt-1">
-                    <div style="
-                      width: 8px; 
-                      height: 8px; 
-                      background-color: ${polylineInfo.style.color}; 
-                      border-radius: 50%; 
-                      margin-right: 4px;
-                    "></div>
-                    <span class="text-xs">Route Color</span>
-                  </div>
-                </div>
-              `)
-              .addTo(mapRef.current);
-
-            stopMarkersRef.current.push(marker);
-          });
-        }
-      } else {
-        console.warn(`No valid coordinates for polyline: ${polylineInfo.name}`);
-      }
-    }
-
-    // Only fit bounds on initial load or when specifically requested
-    // Don't auto-fit when user is just selecting/deselecting routes
-    if (allBounds.length > 0 && !polylinesDrawnRef.current) {
-      const group = new L.FeatureGroup();
-      allBounds.forEach(bounds => {
-        group.addLayer(L.rectangle(bounds, { stroke: false, fill: false }));
-      });
-      
-      mapRef.current.fitBounds(group.getBounds(), {
-        padding: [20, 20],
-        maxZoom: 15
-      });
-    }
-  }, [clearRouteElements, createStopMarker]);
-
-  // Legacy method - Draw route paths on map using polyline API (only called when no polylineData prop is available)
-  const drawRoutePaths = useCallback(async (routes: ApiRoute[]) => {
-    if (!mapRef.current || !routes.length) return;
-
-    console.log('Drawing route paths for routes (fallback API method):', routes.map(r => r.name));
-    console.warn('WARNING: Making API calls from Map component. Consider providing polylineData prop to avoid this.');
-
-    // Only clear if we're showing different routes
-    clearRouteElements(true, true);
-
-    try {
-       // Use the new GeoJSON polyline API method
-      const apiPolylineData = await apiService.getGeoJSONPolylines();
-      
-      console.log('Fetched polyline data via fallback API call:', apiPolylineData);
-      
-      if (!apiPolylineData?.result || apiPolylineData.result.length === 0) {
-        console.warn('No polyline data available from API');
+  const drawPolylinesFromGeoJSON = useCallback(
+    async (polylineResponse: PolylineResponse, filterRoutes?: ApiRoute[]) => {
+      if (!mapRef.current || !polylineResponse?.result) {
+        console.warn('Map not ready or no polyline data');
         return;
       }
 
-      // If we have polyline data, use the GeoJSON method
-      if (apiPolylineData.result.length > 0) {
-        console.log('Using GeoJSON polyline method with fallback API data');
-        drawPolylinesFromGeoJSON(apiPolylineData, routes);
-        return;
-      }
+      const isFirstDraw = !polylinesDrawnRef.current;
+      const shouldFilter = filterRoutes && filterRoutes.length > 0;
 
-      // Fallback to legacy method if needed
-      const legacyPolylineData = await apiService.getRoutePolyline();
-      
-      if (!legacyPolylineData?.routes) {
-        console.warn('No legacy polyline data available');
-        return;
-      }
+      // Clear previous polylines/stops only if route selection changes
+      clearRouteElements(true, true);
 
+      const processedPolylines = processMultiplePolylines(polylineResponse);
       const allBounds: L.LatLngBounds[] = [];
+      const routeStopsMap = new Map<string, RouteStop[]>();
 
-      routes.forEach((route, index) => {
-        // Find matching polyline data for this route
-        const routePolylineData = legacyPolylineData.routes.find(
-          (polyRoute: any) => 
-            polyRoute.segment_id === route.id || 
-            polyRoute.route_name === route.name ||
-            polyRoute.segment_id === route.segment_id
-        );
+      // Choose which routes to process
+      const routesToDraw = shouldFilter
+        ? processedPolylines.filter(poly =>
+            filterRoutes.some(
+              r =>
+                r.segment_id === poly.segmentId ||
+                r.id === poly.segmentId ||
+                r.name === poly.name
+            )
+          )
+        : isFirstDraw
+          ? processedPolylines
+          : [];
 
-        if (routePolylineData) {
-          const color = routePolylineData.color || routeColors[index % routeColors.length];
-          let coordinates: [number, number][] = [];
+      if (routesToDraw.length === 0) {
+        console.log('No routes selected to draw polylines');
+        return;
+      }
 
-          // Process coordinates - handle both encoded polylines and coordinate arrays
-          if (routePolylineData.coordinates && routePolylineData.coordinates.length > 0) {
-            coordinates = processMultiplePolylines(routePolylineData).flatMap(p => p.coordinates);
-          } else if (routePolylineData.polyline) {
-            // Try to decode polyline string
-            coordinates = processMultiplePolylines(routePolylineData).flatMap(p => p.coordinates);
+      for (const polylineInfo of routesToDraw) {
+        if (polylineInfo.coordinates.length === 0) continue;
+
+        // Draw polyline
+        const polyline = L.polyline(polylineInfo.coordinates, {
+          color: polylineInfo.style.color,
+          weight: polylineInfo.style.weight,
+          opacity: polylineInfo.style.opacity,
+        })
+          .bindPopup(`
+            <div class="p-2">
+              <strong>${polylineInfo.name}</strong><br/>
+              Segment ID: ${polylineInfo.segmentId}<br/>
+              Points: ${polylineInfo.coordinates.length}
+            </div>`)
+          .addTo(mapRef.current);
+
+        routeLinesRef.current.push(polyline);
+        allBounds.push(polyline.getBounds());
+
+        // Fetch and draw stops
+        try {
+          let routeStops = routeStopsMap.get(polylineInfo.segmentId);
+
+          if (!routeStops) {
+            const stopsData = await apiService.getStopsForRoute(polylineInfo.name);
+            routeStops = stopsData?.stops ?? [];
+            routeStopsMap.set(polylineInfo.segmentId, routeStops);
           }
 
-          // Draw polyline if we have valid coordinates
-          if (coordinates.length > 0) {
-            console.log(`Drawing polyline for route ${route.name} with ${coordinates.length} points`);
-            
-            const routeLine = L.polyline(
-              coordinates,
-              {
-                color: color,
-                weight: 4,
-                opacity: 0.8
-              }
-            ).bindPopup(`
+          for (let i = 0; i < routeStops.length; i++) {
+            const stop = routeStops[i];
+            const stopIcon = createStopMarker(polylineInfo.style.color, i === routeStops.length - 1 ? -1 : i);
+            const marker = L.marker([stop.latitude, stop.longitude], { icon: stopIcon }).bindPopup(`
               <div class="p-2">
-                <h3 class="font-bold text-sm">${route.name}</h3>
-                <p class="text-xs text-gray-600">${coordinates.length} points</p>
+                <strong>${stop.name}</strong><br/>
+                Stop ${i + 1} of ${routeStops.length}<br/>
+                ETA: ${stop.eta || 'N/A'}
               </div>
             `).addTo(mapRef.current);
 
-            routeLinesRef.current.push(routeLine);
-            allBounds.push(routeLine.getBounds());
-          } else {
-            console.warn(`No valid coordinates found for route: ${route.name}`, routePolylineData);
+            stopMarkersRef.current.push(marker);
+          }
+        } catch (err) {
+          console.warn(`Could not fetch stops for ${polylineInfo.name}`, err);
+        }
+      }
+
+      // Fit bounds only the first time
+      if (allBounds.length > 0 && isFirstDraw) {
+        const group = new L.FeatureGroup();
+        allBounds.forEach(b => group.addLayer(L.rectangle(b, { stroke: false, fill: false })));
+
+        mapRef.current.fitBounds(group.getBounds(), {
+          padding: [30, 30],
+          maxZoom: 15
+        });
+      }
+
+      polylinesDrawnRef.current = true;
+    },
+    [clearRouteElements, createStopMarker]
+  );
+
+
+  // Legacy method - Draw route paths on map using polyline API (only called when no polylineData prop is available)
+  const drawRoutePaths = useCallback(
+    async (routes: ApiRoute[]) => {
+      if (!mapRef.current || routes.length === 0) return;
+
+      console.log('Fallback: Drawing route paths for:', routes.map(r => r.name));
+
+      // Clear previous polylines/stops only if changing selection
+      clearRouteElements(true, true);
+
+      try {
+        // Try new GeoJSON API first
+        const apiPolylineData = await apiService.getGeoJSONPolylines();
+
+        if (apiPolylineData?.result?.length > 0) {
+          console.log('Using GeoJSON fallback polyline method');
+          await drawPolylinesFromGeoJSON(apiPolylineData, routes); // ⚠️ Make sure it respects `filterRoutes`
+          return;
+        }
+
+        // Fallback to legacy polyline
+        const legacyPolylineData = await apiService.getRoutePolyline();
+
+        if (!legacyPolylineData?.routes || legacyPolylineData.routes.length === 0) {
+          console.warn('Legacy fallback polyline data empty');
+          return;
+        }
+
+        const allBounds: L.LatLngBounds[] = [];
+
+        for (let i = 0; i < routes.length; i++) {
+          const route = routes[i];
+          const match = legacyPolylineData.routes.find(
+            (r: any) =>
+              r.segment_id === route.segment_id ||
+              r.segment_id === route.id ||
+              r.route_name === route.name
+          );
+
+          if (!match) {
+            console.warn(`No legacy polyline found for route: ${route.name}`);
+            continue;
           }
 
-          // Add stop markers if available
-          if (routePolylineData.stops && routePolylineData.stops.length > 0) {
-            routePolylineData.stops.forEach((stop: any, stopIndex: number) => {
+          const color = match.color || routeColors[i % routeColors.length];
+          const polyInfo = processMultiplePolylines(match);
+          const coords = polyInfo.flatMap(p => p.coordinates);
+
+          if (coords.length === 0) {
+            console.warn(`No coordinates for ${route.name}`);
+            continue;
+          }
+
+          const line = L.polyline(coords, {
+            color,
+            weight: 4,
+            opacity: 0.8,
+          })
+            .bindPopup(`
+              <div class="p-2">
+                <strong>${route.name}</strong><br/>
+                ${coords.length} points
+              </div>`)
+            .addTo(mapRef.current);
+
+          routeLinesRef.current.push(line);
+          allBounds.push(line.getBounds());
+
+          // Draw stops
+          if (Array.isArray(match.stops)) {
+            match.stops.forEach((stop: any, idx: number) => {
               const stopIcon = createStopMarker(color);
               const marker = L.marker([stop.latitude, stop.longitude], { icon: stopIcon })
                 .bindPopup(`
                   <div class="p-2">
-                    <h3 class="font-bold text-sm">${stop.name}</h3>
-                    <p class="text-xs text-gray-600">Route: ${route.name}</p>
-                    <p class="text-xs">Stop ${stopIndex + 1}</p>
-                    ${stop.eta ? `<p class="text-xs font-medium">ETA: ${stop.eta}</p>` : ''}
+                    <strong>${stop.name}</strong><br/>
+                    Stop ${idx + 1}<br/>
+                    ${stop.eta ? `ETA: ${stop.eta}` : ''}
                   </div>
                 `)
                 .addTo(mapRef.current);
@@ -586,120 +399,154 @@ const MapComponent: React.FC<MapComponentProps> = ({
               stopMarkersRef.current.push(marker);
             });
           }
-        } else {
-          console.warn(`No polyline data found for route: ${route.name}`);
         }
-      });
 
-      // Fit map to show all routes
-      if (allBounds.length > 0) {
-        const group = new L.FeatureGroup();
-        allBounds.forEach(bounds => {
-          group.addLayer(L.rectangle(bounds, { stroke: false, fill: false }));
-        });
-        
-        mapRef.current.fitBounds(group.getBounds(), {
-          padding: [20, 20],
-          maxZoom: 15
-        });
+        // Only fit bounds on first polyline draw (avoid zoom reset on update)
+        if (allBounds.length > 0 && !polylinesDrawnRef.current) {
+          const group = new L.FeatureGroup();
+          allBounds.forEach(b => group.addLayer(L.rectangle(b, { stroke: false, fill: false })));
+
+          mapRef.current.fitBounds(group.getBounds(), {
+            padding: [20, 20],
+            maxZoom: 15,
+          });
+        }
+
+        polylinesDrawnRef.current = true;
+      } catch (err) {
+        console.error('Error drawing fallback route paths:', err);
       }
-    } catch (error) {
-      console.error('Failed to fetch polyline data:', error);
-    }
-  }, [clearRouteElements, createStopMarker, routeColors, drawPolylinesFromGeoJSON]);
+    },
+    [clearRouteElements, createStopMarker, routeColors, drawPolylinesFromGeoJSON]
+  );
+
 
   // Fetch all vehicles - independent of polyline management with rate limiting
   const fetchAllVehicles = useCallback(async () => {
-    // Rate limiting: only allow vehicle updates every 4 seconds minimum
-    const now = Date.now();
-    if (now - lastVehicleUpdateRef.current < 4000) {
-      console.log('Rate limiting: Skipping vehicle update (too frequent)');
-      return;
-    }
-    lastVehicleUpdateRef.current = now;
-    
-    try {
-      setConnectionStatus('loading');
-      console.log('Fetching vehicle data (preserving polylines)');
-      const avlData = await apiService.getAvlData();
-      
-      if (avlData?.result && Array.isArray(avlData.result) && avlData.result.length > 0) {
-        const allVehicles: Vehicle[] = [];
-        
-        avlData.result.forEach((vehicleGroup: any) => {
-          if (vehicleGroup.avl_data && Array.isArray(vehicleGroup.avl_data)) {
-            vehicleGroup.avl_data.forEach((vehicle: any) => {
-              // Handle the actual API structure
-              const processedVehicle: Vehicle = {
-                id: vehicle.id || 0,
-                adid: vehicle.adid,
-                vehicle_id: vehicleGroup.vehicle_id || vehicle.vehicle_id,
-                driver_id: vehicleGroup.driver_id || vehicle.driver_id,
-                segment_id: vehicleGroup.segment_id || vehicle.segment_id,
-                record_date: vehicle.record_date,
-                record_time: vehicle.record_time,
-                lat: vehicle.lat,
-                lng: vehicle.lng,
-                speed: vehicle.speed,
-                angle: vehicle.angle,
-                direction: vehicle.direction,
-                device_time: vehicle.device_time,
-                // For backward compatibility, also set the old field names
-                latitude: vehicle.lat,
-                longitude: vehicle.lng,
-                heading: vehicle.angle || vehicle.direction,
-                timestamp: vehicle.record_time ? 
-                  `${vehicle.record_date} ${vehicle.record_time}` : 
-                  new Date().toISOString()
-              };
-              
-              allVehicles.push(processedVehicle);
-            });
-          }
-        });
-        
-        // Update vehicles without affecting polylines
-        setVehicles(allVehicles);
-        updateVehicleMarkers(allVehicles);
-        setConnectionStatus('connected');
-        setConnectionError(null); // Clear any previous errors
-        console.log(`Updated ${allVehicles.length} vehicle markers, polylines preserved`);
-      } else {
-        console.log('No vehicle data available from API');
-        setVehicles([]);
-        setConnectionStatus('connected'); // API responded but no data
-        // Clear existing vehicle markers when no data is available
-        vehicleMarkersRef.current.forEach((marker) => {
-          if (mapRef.current) {
-            mapRef.current.removeLayer(marker);
-          }
-        });
-        vehicleMarkersRef.current.clear();
-      }
-    } catch (error) {
-      console.error('Failed to fetch vehicles:', error);
-      setVehicles([]);
-      setConnectionStatus('error');
-      
-      // Set user-friendly error message
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      if (errorMessage.includes('CORS')) {
-        setConnectionError('Unable to connect to the tracking server. This may be due to browser security restrictions. Try refreshing the page or contact support.');
-      } else if (errorMessage.includes('fetch')) {
-        setConnectionError('Network connection error. Please check your internet connection and try again.');
-      } else {
-        setConnectionError('Server temporarily unavailable. Retrying automatically...');
-      }
-      
-      // Clear existing vehicle markers on error
-      vehicleMarkersRef.current.forEach((marker) => {
-        if (mapRef.current) {
-          mapRef.current.removeLayer(marker);
+  const now = Date.now();
+
+  // Limit update frequency
+  if (now - lastVehicleUpdateRef.current < 4000) {
+    console.log('Rate limiting: Skipping vehicle update',);
+    return;
+  }
+  lastVehicleUpdateRef.current = now;
+
+  try {
+    setConnectionStatus('loading');
+    const avlData = await apiService.getAvlData();
+
+    if (avlData?.result && Array.isArray(avlData.result)) {
+      const allVehicles: Vehicle[] = [];
+
+      avlData.result.forEach(vehicleGroup => {
+        if (Array.isArray(vehicleGroup.avl_data)) {
+          vehicleGroup.avl_data.forEach(vehicle => {
+            const v: Vehicle = {
+              id: vehicle.id,
+              adid: vehicle.adid,
+              vehicle_id: vehicleGroup.vehicle_id || vehicle.vehicle_id,
+              driver_id: vehicleGroup.driver_id || vehicle.driver_id,
+              segment_id: vehicleGroup.segment_id || vehicle.segment_id,
+              lat: vehicle.lat,
+              lng: vehicle.lng,
+              speed: vehicle.speed,
+              angle: vehicle.angle,
+              direction: vehicle.direction,
+              device_time: vehicle.device_time,
+              latitude: vehicle.lat,
+              longitude: vehicle.lng,
+              heading: vehicle.angle || vehicle.direction,
+              timestamp: `${vehicle.record_date} ${vehicle.record_time}` || new Date().toISOString()
+            };
+
+            allVehicles.push(v);
+          });
         }
+      });
+
+      // Smooth marker update logic (without removing all and re-adding)
+      const allowedSegmentIds = new Set<string>(
+        selectedRoutesForMap.map(route => route.segment_id)
+      );
+
+      const filteredVehicles = allVehicles.filter(vehicle =>
+        allowedSegmentIds.has(vehicle.segment_id ?? '')
+      );
+      console.log("allVehicles : ",allVehicles,"selectedRoutesForMap", selectedRoutesForMap,"filteredVehicles",filteredVehicles)
+       filteredVehicles.forEach(vehicle => {
+        const key = String(vehicle.vehicle_id);
+        const latlng = L.latLng(vehicle.lat, vehicle.lng);
+        const icon = createVehicleIcon(vehicle.vehicle_id, vehicle.speed);
+        const existingMarker = vehicleMarkersRef.current.get(key);
+
+        if (existingMarker) {
+          const startLatLng = existingMarker.getLatLng();
+          const endLatLng = latlng;
+          const duration = 4000;
+          const steps = 60;
+          let currentStep = 0;
+
+          const latStep = (endLatLng.lat - startLatLng.lat) / steps;
+          const lngStep = (endLatLng.lng - startLatLng.lng) / steps;
+
+          const animate = () => {
+            currentStep++;
+            const intermediateLat = startLatLng.lat + latStep * currentStep;
+            const intermediateLng = startLatLng.lng + lngStep * currentStep;
+            existingMarker.setLatLng([intermediateLat, intermediateLng]);
+            if (currentStep < steps) {
+              requestAnimationFrame(animate);
+            }
+          };
+          animate();
+
+          existingMarker.setIcon(icon);
+        } else {
+          const newMarker = L.marker(latlng, {
+            icon,
+            title: `Vehicle ${vehicle.vehicle_id}`
+          }).addTo(mapRef.current!);
+
+          vehicleMarkersRef.current.set(key, newMarker);
+        }
+      });
+      setVehicles(filteredVehicles);
+      setConnectionStatus('connected');
+      setConnectionError(null);
+    } else {
+      console.warn('No AVL data returned');
+      setVehicles([]);
+      setConnectionStatus('connected');
+
+      // Only clear markers, preserve routes
+      vehicleMarkersRef.current.forEach(marker => {
+        mapRef.current?.removeLayer(marker);
       });
       vehicleMarkersRef.current.clear();
     }
-  }, [updateVehicleMarkers]);
+  } catch (error) {
+    console.error('Vehicle fetch failed:', error);
+    setConnectionStatus('error');
+    setVehicles([]);
+
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    if (message.includes('CORS')) {
+      setConnectionError('Tracking server unreachable due to browser CORS restrictions.');
+    } else if (message.includes('fetch')) {
+      setConnectionError('Network error while fetching vehicle data.');
+    } else {
+      setConnectionError('Server error while fetching vehicle data.');
+    }
+
+    // Only clear markers, preserve routes
+    vehicleMarkersRef.current.forEach(marker => {
+      mapRef.current?.removeLayer(marker);
+    });
+    vehicleMarkersRef.current.clear();
+  }
+}, [selectedRoutesForMap,updateVehicleMarkers]);
+
 
   // Start vehicle tracking - optimized to prevent map reloading
   const startVehicleTracking = useCallback(() => {
@@ -786,7 +633,17 @@ const MapComponent: React.FC<MapComponentProps> = ({
       console.log('Map not ready, skipping polyline update');
       return;
     }
-
+    console.log('useeffect',selectedRoutesForMap);
+    if (selectedRoutesForMap.length === 0) {
+      if (polylinesDrawnRef.current) {
+        console.log('Clearing all polylines - no routes selected');
+        clearRouteElements(true, true);
+        polylinesDrawnRef.current = false;
+        currentPolylineDataRef.current = null;
+        currentSelectedRoutesRef.current = [];
+      }
+      return; // ⛔ Do not proceed to draw anything
+    }
     // More precise change detection to prevent unnecessary redraws
     const currentRouteIds = currentSelectedRoutesRef.current.map(r => r.id).sort().join(',');
     const newRouteIds = selectedRoutesForMap.map(r => r.id).sort().join(',');
@@ -798,11 +655,14 @@ const MapComponent: React.FC<MapComponentProps> = ({
       JSON.stringify(currentPolylineDataRef.current.result) !== JSON.stringify(polylineData.result)
     );
     
-    const shouldUpdate = (!polylinesDrawnRef.current && polylineData?.result?.length > 0) || 
-                        hasPolylineDataChanged || 
-                        hasSelectedRoutesChanged ||
-                        (selectedRoutesForMap.length === 0 && polylinesDrawnRef.current);
-    
+    const shouldUpdate = (
+      selectedRoutesForMap.length > 0 && // ⬅️ prevent initial draw
+      (
+        !polylinesDrawnRef.current && polylineData?.result?.length > 0 ||
+        hasPolylineDataChanged ||
+        hasSelectedRoutesChanged
+      )
+    );
     if (!shouldUpdate) {
       console.log('Polylines preserved - no actual changes detected');
       return;
@@ -869,7 +729,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
       <div 
         ref={mapContainer} 
         className="h-full w-full"
-        style={{ height: '100%' }}
       />
       
       {/* Status indicator */}

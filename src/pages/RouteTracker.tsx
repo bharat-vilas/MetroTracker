@@ -43,19 +43,23 @@ const RouteTracker: React.FC = () => {
       <Header />
       
       {/* Main content area */}
-      <div className="flex-1 flex">
-        <div className="w-80 z-10">
+      <div className=" flex " style={{height: "100vh"}}>
+        <div className="w-70 z-10" >
           <RoutesList 
             onRouteSelect={handleRouteSelect}
+            selectedRoutesForMap={selectedRoutesForMap}
+            setSelectedRoutesForMap={setSelectedRoutesForMap}
             selectedRoute={selectedRoute}
             onRoutesForMap={handleRoutesForMap}
           />
         </div>
         <div className="flex-1">
         <MapComponent 
+        
           selectedRoutesForMap={selectedRoutesForMap}
           polylineData={polylineData}
           isLoadingPolylines={isLoadingPolylines}
+
         />
         </div>
       </div>

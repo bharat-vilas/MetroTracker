@@ -5,7 +5,7 @@ const Header: React.FC = () => {
   return (
     <div className="w-full bg-primary text-primary-foreground py-3 px-6 flex items-center gap-3 shadow-sm border-b">
       <div className="flex items-center gap-3">
-        <div className="w-12 h-12 bg-destructive flex items-center justify-center rounded">
+        <div className="w-12 h-10 bg-destructive flex items-center justify-center rounded">
           <div className="text-background font-bold text-lg transform -skew-x-12">M</div>
         </div>
         <div className="text-lg font-semibold">BAY Metro Transit</div>
