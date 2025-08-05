@@ -1,14 +1,17 @@
-.vehicle-emoji {
-  font-size: 25px;
-  background: transparent !important;
-  width: auto;
-  height: auto;
-  display: inline-block;
-  padding: 0;
-  margin-right: 0;
-  line-height: 1;
-  z-index: 1000;
+.vehicle-icon-wrapper {
+  transition: transform 0.4s linear;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vehicle-img {
+  width: 40px;
+  height: 40px;
+  transition: transform 0.3s ease;
   pointer-events: none;
+  user-select: none;
+  transform-origin: center center;
 }
 
 /* Reuse your existing pulse animation */
