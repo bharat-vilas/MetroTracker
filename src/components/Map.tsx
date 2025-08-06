@@ -92,6 +92,14 @@ interface MapComponentProps {
   selectedRoutesForMap?: ApiRoute[];
   polylineData?: PolylineResponse;
   isLoadingPolylines?: boolean;
+  zoomToStop?: {
+    latitude: number;
+    longitude: number;
+    name: string;
+    stopNumber?: number;
+    eta?: string;
+  } | null;
+  onVehiclesUpdate?: (vehicles: Vehicle[]) => void;
 }
 
 const MapComponent: React.FC<MapComponentProps> = ({
@@ -100,6 +108,8 @@ const MapComponent: React.FC<MapComponentProps> = ({
   selectedRoutesForMap,
   polylineData,
   isLoadingPolylines = false,
+  zoomToStop,
+  onVehiclesUpdate,
 }) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -107,6 +117,8 @@ const MapComponent: React.FC<MapComponentProps> = ({
   const stopMarkersRef = useRef<L.Marker[]>([]);
   const vehicleMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const stopPopupRef = useRef<L.Popup | null>(null);
+  const stopMarkerRef = useRef<L.Marker | null>(null);
 
   // Route colors for visual distinction
   const routeColors = [
@@ -138,12 +150,16 @@ const MapComponent: React.FC<MapComponentProps> = ({
     "connected" | "error" | "loading"
   >("loading");
 
-  const createVehicleIcon = (vehicleId: string, speed: number = 0, direction: number = 0) => {
+  const createVehicleIcon = (
+    vehicleId: string,
+    speed: number = 0,
+    direction: number = 0
+  ) => {
     const isMoving = speed > 0;
 
     return L.divIcon({
       html: `
-      <div class="vehicle-icon-wrapper ${isMoving ? 'vehicle-pulse' : ''}">
+      <div class="vehicle-icon-wrapper ${isMoving ? "vehicle-pulse" : ""}">
         <img 
           src="/img/car_logo.png" 
           alt="Car" 
@@ -204,6 +220,18 @@ const MapComponent: React.FC<MapComponentProps> = ({
     vehicleMarkersRef.current.clear();
   }, []);
 
+  // Clear stop popup and marker
+  const clearStopPopup = useCallback(() => {
+    if (stopPopupRef.current && mapRef.current) {
+      mapRef.current.closePopup(stopPopupRef.current);
+      stopPopupRef.current = null;
+    }
+    if (stopMarkerRef.current && mapRef.current) {
+      mapRef.current.removeLayer(stopMarkerRef.current);
+      stopMarkerRef.current = null;
+    }
+  }, []);
+
   // Update vehicle markers with smooth transitions
   const updateVehicleMarkers = useCallback((vehicles: Vehicle[]) => {
     if (!mapRef.current) return;
@@ -221,7 +249,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
         // Update rotation
         const markerEl = existingMarker.getElement();
         if (markerEl) {
-          const img = markerEl.querySelector<HTMLImageElement>('.vehicle-img');
+          const img = markerEl.querySelector<HTMLImageElement>(".vehicle-img");
           if (img) {
             img.style.transform = `rotate(${vehicle.direction ?? 0}deg)`;
           }
@@ -260,7 +288,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
       }
     });
   }, []);
-
 
   // Create stop marker with color
   const createStopMarker = useCallback((color: string, stopIndex?: number) => {
@@ -366,7 +393,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
               <div class="p-2">
                 <strong>${stop.name}</strong><br/>
                 Stop ${i + 1} of ${routeStops.length}<br/>
-                ETA: ${stop.eta || "N/A"}
+                                 ETA: ${stop.eta || ""}
               </div>
             `
               )
@@ -587,79 +614,86 @@ const MapComponent: React.FC<MapComponentProps> = ({
         filteredVehicles.forEach((vehicle) => {
           const key = String(vehicle.vehicle_id);
           const latlng = L.latLng(vehicle.lat, vehicle.lng);
-          const icon = createVehicleIcon(vehicle.vehicle_id, vehicle.speed,vehicle.direction);
+          const icon = createVehicleIcon(
+            vehicle.vehicle_id,
+            vehicle.speed,
+            vehicle.direction
+          );
           const existingMarker = vehicleMarkersRef.current.get(key);
 
           if (existingMarker) {
-          const startLatLng = existingMarker.getLatLng();
-          const endLatLng = latlng;
-          const duration = 4000;
-          const steps = 60;
-          let currentStep = 0;
+            const startLatLng = existingMarker.getLatLng();
+            const endLatLng = latlng;
+            const duration = 4000;
+            const steps = 60;
+            let currentStep = 0;
 
-          const latStep = (endLatLng.lat - startLatLng.lat) / steps;
-          const lngStep = (endLatLng.lng - startLatLng.lng) / steps;
+            const latStep = (endLatLng.lat - startLatLng.lat) / steps;
+            const lngStep = (endLatLng.lng - startLatLng.lng) / steps;
 
-          const animate = () => {
-            currentStep++;
-            const intermediateLat = startLatLng.lat + latStep * currentStep;
-            const intermediateLng = startLatLng.lng + lngStep * currentStep;
+            const animate = () => {
+              currentStep++;
+              const intermediateLat = startLatLng.lat + latStep * currentStep;
+              const intermediateLng = startLatLng.lng + lngStep * currentStep;
 
-            existingMarker.setLatLng([intermediateLat, intermediateLng]);
+              existingMarker.setLatLng([intermediateLat, intermediateLng]);
 
-            // 🔄 Rotate image during movement
-            const markerEl = existingMarker.getElement();
-            if (markerEl) {
-              const img = markerEl.querySelector<HTMLImageElement>('.vehicle-img');
-              if (img) {
-                img.style.transform = `rotate(${ vehicle.direction ?? 0}deg)`;
+              // 🔄 Rotate image during movement
+              const markerEl = existingMarker.getElement();
+              if (markerEl) {
+                const img =
+                  markerEl.querySelector<HTMLImageElement>(".vehicle-img");
+                if (img) {
+                  img.style.transform = `rotate(${vehicle.direction ?? 0}deg)`;
+                }
               }
-            }
 
-            if (currentStep < steps) {
-              requestAnimationFrame(animate);
-            }
-          };
+              if (currentStep < steps) {
+                requestAnimationFrame(animate);
+              }
+            };
 
-          animate();
+            animate();
 
-          // Update icon (in case movement status changes pulse effect)
-          existingMarker.setIcon(icon);
+            // Update icon (in case movement status changes pulse effect)
+            existingMarker.setIcon(icon);
 
-          // 🧾 Update tooltip content
-          existingMarker.setTooltipContent(
-            `🚗 <strong>ID:</strong> ${vehicle.vehicle_id}<br>
+            // 🧾 Update tooltip content
+            existingMarker.setTooltipContent(
+              `🚗 <strong>ID:</strong> ${vehicle.vehicle_id}<br>
             <strong>Speed:</strong> ${vehicle.speed} km/h<br>
             <strong>Time:</strong> ${vehicle.device_time}`
-          );
-        } else {
-          // 🚗 First time marker creation
-          const newMarker = L.marker(latlng, {
-            icon,
-          }).addTo(mapRef.current!);
+            );
+          } else {
+            // 🚗 First time marker creation
+            const newMarker = L.marker(latlng, {
+              icon,
+            }).addTo(mapRef.current!);
 
-          newMarker.bindTooltip(
-            `🚗 <strong>ID:</strong> ${vehicle.vehicle_id}<br>
+            newMarker.bindTooltip(
+              `🚗 <strong>ID:</strong> ${vehicle.vehicle_id}<br>
             <strong>Speed:</strong> ${vehicle.speed} km/h<br>
             <strong>Time:</strong> ${vehicle.device_time}`,
-            {
-              className: 'custom-vehicle-tooltip',
-              direction: 'top',
-              offset: [0, -10],
-              opacity: 0.95,
-            }
-          );
+              {
+                className: "custom-vehicle-tooltip",
+                direction: "top",
+                offset: [0, -10],
+                opacity: 0.95,
+              }
+            );
 
-          vehicleMarkersRef.current.set(key, newMarker);
-        }
-
+            vehicleMarkersRef.current.set(key, newMarker);
+          }
         });
         setVehicles(filteredVehicles);
+        // Pass all vehicles (before filtering) to RoutesList for status determination
+        onVehiclesUpdate?.(allVehicles);
         setConnectionStatus("connected");
         setConnectionError(null);
       } else {
         console.warn("No AVL data returned");
         setVehicles([]);
+        onVehiclesUpdate?.([]);
         setConnectionStatus("connected");
 
         // Only clear markers, preserve routes
@@ -672,6 +706,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
       console.error("Vehicle fetch failed:", error);
       setConnectionStatus("error");
       setVehicles([]);
+      onVehiclesUpdate?.([]);
 
       const message = error instanceof Error ? error.message : "Unknown error";
       if (message.includes("CORS")) {
@@ -730,7 +765,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
 
     // Create map
     const map = L.map(mapContainer.current, {
-      center: [42.3601, -71.0589], // Default to Boston coordinates
+      center: [43.607483, -83.870869], // Default to Boston coordinates
       zoom: 13,
       zoomControl: true,
       attributionControl: false,
@@ -753,6 +788,9 @@ const MapComponent: React.FC<MapComponentProps> = ({
       clearMapElements();
       clearVehicleMarkers();
 
+      // Clear stop popup and marker
+      clearStopPopup();
+
       // Ensure interval is cleared
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -774,6 +812,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
     stopVehicleTracking,
     clearMapElements,
     clearVehicleMarkers,
+    clearStopPopup,
   ]);
 
   // Handle polyline data changes (new primary method) - with independence from vehicle updates and strict change detection
@@ -896,6 +935,58 @@ const MapComponent: React.FC<MapComponentProps> = ({
     drawRoutePaths,
     clearRouteElements,
   ]);
+
+  // Handle zoom to stop
+  useEffect(() => {
+    if (zoomToStop && mapRef.current) {
+      const { latitude, longitude, name, stopNumber, eta } = zoomToStop;
+
+      // Clear any existing stop popup
+      if (stopPopupRef.current && mapRef.current) {
+        mapRef.current.closePopup(stopPopupRef.current);
+        stopPopupRef.current = null;
+      }
+
+      // Zoom to the stop location
+      mapRef.current.setView([latitude, longitude], 16);
+
+      // Create and open popup at the stop location (no new marker)
+      const popup = L.popup({
+        closeButton: true,
+        autoClose: false,
+        closeOnClick: false,
+        className: "stop-popup",
+        maxWidth: 200,
+        maxHeight: 150,
+      })
+        .setLatLng([latitude, longitude])
+        .setContent(
+          `
+          <div class="p-1">
+            <div class="text-xs font-medium text-gray-800 mb-1">🚏 ${name}</div>
+                         <div class="text-xs text-gray-600">
+                               <strong>Stop Number:</strong> ${
+                                 stopNumber || ""
+                               }<br>
+                <strong>ETA:</strong> ${eta || ""}
+             </div>
+          </div>
+        `
+        )
+        .openOn(mapRef.current);
+
+      stopPopupRef.current = popup;
+
+      // Keep the popup open - no auto-close timeout
+
+      return () => {
+        if (stopPopupRef.current && mapRef.current) {
+          mapRef.current.closePopup(stopPopupRef.current);
+          stopPopupRef.current = null;
+        }
+      };
+    }
+  }, [zoomToStop]);
 
   return (
     <div className="relative flex-1 h-full">
